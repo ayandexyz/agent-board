@@ -522,7 +522,7 @@ func TestAppDashboardViewRenders(t *testing.T) {
 	}
 	// Sidebar must show installed agents with count 0 when no sessions are active.
 	hasZeroAgent := false
-	for _, name := range []string{"claude-code", "opencode", "codex", "cursor", "freecode"} {
+	for _, name := range []string{"claude-code", "opencode", "codex", "cursor", "freecode", "antigravity"} {
 		if regexp.MustCompile(`(?m)^\s*▸?\s*` + regexp.QuoteMeta(name) + `\s+0\b`).MatchString(plain) {
 			hasZeroAgent = true
 			break

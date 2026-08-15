@@ -157,6 +157,37 @@ func NewFreeCode() *Config {
 	}
 }
 
+// Antigravity is Google Antigravity's terminal CLI agent (`agy`). It runs
+// inside a tmux window backed by an interactive shell, whose own prompt
+// commonly ends in "❯" (e.g. starship). Ready/idle detection must only match
+// text unique to Antigravity's own interactive UI — never a bare "❯"/">" (the
+// wrapping shell's prompt) and never "Antigravity CLI" alone, which also
+// appears on the pre-auth "Welcome to the Antigravity CLI... Signing in..."
+// screen before the input box exists. The "for shortcuts" footer only
+// renders once the prompt box is actually interactive.
+func NewAntigravity() *Config {
+	return &Config{
+		Name:         "antigravity",
+		Bin:          "agy",
+		Args:         []string{},
+		ReadyPattern: regexp.MustCompile(`(?i)for\s+shortcuts`),
+		SendPrompt:   SendPromptSingleLine,
+		FormatPrompt: DefaultFormatPrompt,
+		IdlePatterns: []*regexp.Regexp{
+			regexp.MustCompile(`(?i)for\s+shortcuts`),
+		},
+		GracePeriod:     8 * time.Second,
+		FallbackTimeout: 10 * time.Second,
+		// The tmux-backed runner treats ReadyWait as the whole deadline for
+		// the ready pattern to appear, not a post-match settle delay. agy
+		// signs in asynchronously on startup, which can take several
+		// seconds, so this needs real headroom or waitForReady gives up
+		// before the input box even exists and the prompt is silently
+		// never sent.
+		ReadyWait: 20 * time.Second,
+	}
+}
+
 func NewRegistry() map[string]*Config {
 	return map[string]*Config{
 		"opencode":    NewOpenCode(),
@@ -165,6 +196,8 @@ func NewRegistry() map[string]*Config {
 		"codex":       NewCodex(),
 		"gemini":      NewGeminiCode(),
 		"freecode":    NewFreeCode(),
+		"antigravity": NewAntigravity(),
+		"agy":         NewAntigravity(),
 	}
 }
 

@@ -45,6 +45,7 @@ func newTestDashboard(t *testing.T) DashboardModel {
 		{Name: "codex", Binary: "codex", Found: false},
 		{Name: "cursor", Binary: "cursor", Found: false},
 		{Name: "freecode", Binary: "freecode", Found: false},
+		{Name: "antigravity", Binary: "agy", Found: false},
 	}
 
 	// Create a fake orchestrator for testing
@@ -60,8 +61,8 @@ func TestNewDashboardModel(t *testing.T) {
 	if m.resolver == nil {
 		t.Error("resolver is nil")
 	}
-	if len(m.Agents) != 5 {
-		t.Errorf("Agents = %d, want 5", len(m.Agents))
+	if len(m.Agents) != 6 {
+		t.Errorf("Agents = %d, want 6", len(m.Agents))
 	}
 	if m.width != 0 {
 		t.Errorf("width = %d, want 0", m.width)
@@ -467,7 +468,7 @@ func TestDashboardSidebarShowsInstalledAgentsEvenWhenIdle(t *testing.T) {
 	if strings.Contains(plain, "No active sessions") {
 		t.Errorf("sidebar should not show 'No active sessions' placeholder when installed agents exist, got:\n%s", plain)
 	}
-	// codex/cursor/freecode are not installed → each still renders as a single
+	// codex/cursor/freecode/antigravity are not installed → each still renders as a single
 	// merged entry (dim logo + name + count 0), just not cursor-selectable.
 	if !strings.Contains(plain, "codex") {
 		t.Errorf("sidebar should still render uninstalled codex, got:\n%s", plain)
@@ -476,7 +477,10 @@ func TestDashboardSidebarShowsInstalledAgentsEvenWhenIdle(t *testing.T) {
 		t.Errorf("sidebar should still render uninstalled cursor, got:\n%s", plain)
 	}
 	if !strings.Contains(plain, "freecode") {
-		t.Errorf("sidebar should render all 5 providers from agentSpecs, got:\n%s", plain)
+		t.Errorf("sidebar should still render uninstalled freecode, got:\n%s", plain)
+	}
+	if !strings.Contains(plain, "antigravity") {
+		t.Errorf("sidebar should render all 6 providers from agentSpecs, got:\n%s", plain)
 	}
 }
 
@@ -491,9 +495,9 @@ func TestDashboardSidebarRendersMergedLogoEntries(t *testing.T) {
 
 	// Each entry is "logo (3 lines) + name+count (1 line)" = 4 lines, in
 	// fixed spec order. The name and its count must appear on the same line.
-	nameLine := make(map[string]int, 5)
+	nameLine := make(map[string]int, 6)
 	for i, l := range lines {
-		for _, name := range []string{"claude-code", "opencode", "codex", "cursor", "freecode"} {
+		for _, name := range []string{"claude-code", "opencode", "codex", "cursor", "freecode", "antigravity"} {
 			if _, ok := nameLine[name]; ok {
 				continue
 			}
@@ -503,7 +507,7 @@ func TestDashboardSidebarRendersMergedLogoEntries(t *testing.T) {
 		}
 	}
 
-	wantNames := []string{"claude-code", "opencode", "codex", "cursor", "freecode"}
+	wantNames := []string{"claude-code", "opencode", "codex", "cursor", "freecode", "antigravity"}
 	prev := -1
 	for _, name := range wantNames {
 		idx, ok := nameLine[name]

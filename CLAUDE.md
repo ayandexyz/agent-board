@@ -150,7 +150,7 @@ id          TEXT PRIMARY KEY  (e.g. AGT-03)
 title       TEXT
 prompt      TEXT
 status      TEXT  (backlog | in_progress | review | done)
-agent       TEXT  (claude-code | opencode | cursor | null)
+agent       TEXT  (claude-code | opencode | cursor | freecode | antigravity | null)
 branch      TEXT
 created_at  DATETIME
 updated_at  DATETIME

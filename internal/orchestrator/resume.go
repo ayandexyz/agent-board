@@ -16,6 +16,8 @@ var resumePatterns = []*regexp.Regexp{
 	regexp.MustCompile(`(?i)(freecode\s+--resume\s+\S+)`),
 	regexp.MustCompile(`(?i)(codex\s+--resume\s+\S+)`),
 	regexp.MustCompile(`(?i)(gemini\s+--resume\s+\S+)`),
+	regexp.MustCompile(`(?i)(agy\s+(?:--continue|-c|--conversation\s+\S+|--resume\s+\S+))`),
+	regexp.MustCompile(`(?i)(antigravity\s+--resume\s+\S+)`),
 }
 
 func ExtractResumeCommand(output string) string {

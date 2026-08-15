@@ -38,7 +38,7 @@ The long-term product direction is full AI agent orchestration:
 - `internal/keybinding` handles keymap definitions, config overrides, and action resolution
 - `internal/llm` provides provider registry (openai, ollama, claude, zai) with LangChain Go behind a Client interface
 - `internal/orchestrator` implements proposal creation, approval gating, session start, outcome mapping, context carry persistence, and agent execution via TmuxRunner and PtyRunner
-- `internal/pty` provides agent configs (opencode, claude-code, codex, gemini) with ready patterns, prompt formatting, and PTY state machine
+- `internal/pty` provides agent configs (opencode, claude-code, codex, gemini, freecode, antigravity) with ready patterns, prompt formatting, and PTY state machine
 - `internal/prompt` central repository for all LLM prompt templates
 - `internal/mcp` provides MCP manager, context carry adapter with load/save via MCP protocol
 - `internal/mcpclient` wraps mcp-go stdio client for MCP server communication

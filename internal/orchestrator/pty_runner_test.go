@@ -199,13 +199,13 @@ func TestPtyRunnerStartTicketRunCreatesInteractiveTicketSession(t *testing.T) {
 	t.Setenv("TMUX", "/tmp/tmux-test,123,0")
 	t.Setenv("HOME", t.TempDir())
 
+	const logEnvVar = "FAKE_TMUX_LOG_INTERACTIVE_TEST"
 	tmuxDir := t.TempDir()
 	logFile := filepath.Join(tmuxDir, "tmux.log")
-	t.Setenv("FAKE_TMUX_LOG", logFile)
-	t.Setenv("PATH", tmuxDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv(logEnvVar, logFile)
 
 	fakeTmux := `#!/bin/sh
-printf '%s\n' "$*" >> "$FAKE_TMUX_LOG"
+printf '%s\n' "$*" >> "$FAKE_TMUX_LOG_INTERACTIVE_TEST"
 case "$1" in
   display-message)
     printf 'project-board\n'
@@ -230,6 +230,7 @@ esac
 	if err := os.WriteFile(filepath.Join(tmuxDir, "tmux"), []byte(fakeTmux), 0755); err != nil {
 		t.Fatalf("write fake tmux: %v", err)
 	}
+	t.Setenv("PATH", tmuxDir+string(os.PathListSeparator)+os.Getenv("PATH"))
 
 	runner, err := NewTmuxAgentRunner("project-board")
 	if err != nil {
@@ -245,13 +246,19 @@ esac
 		t.Fatalf("Start() error = %v", err)
 	}
 
-	time.Sleep(300 * time.Millisecond)
-
-	raw, err := os.ReadFile(logFile)
-	if err != nil {
-		t.Fatalf("read tmux log: %v", err)
+	deadline := time.Now().Add(3 * time.Second)
+	var log string
+	for time.Now().Before(deadline) {
+		raw, err := os.ReadFile(logFile)
+		if err == nil {
+			log = string(raw)
+			if strings.Contains(log, "send-keys -t %42 Enter") && strings.Count(log, "send-keys -t %42 Enter\n") >= 2 {
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	log := string(raw)
+
 	if !strings.Contains(log, "new-window") {
 		t.Fatalf("Start() did not create the ticket agent session:\n%s", log)
 	}
@@ -324,7 +331,7 @@ esac
 		}
 		log = string(raw)
 		// The trailing Enter follows the last char of "two" ('o').
-		if strings.Contains(log, "send-keys -t %42 -l o\n") && strings.Count(log, "send-keys -t %42 Enter\n") >= 2 {
+		if strings.Contains(log, "send-keys -t %42 -l o\n") && strings.Count(log, "Enter\n") >= 2 {
 			break
 		}
 		time.Sleep(50 * time.Millisecond)
@@ -338,7 +345,7 @@ esac
 	}
 	// Exactly one trailing submit Enter is expected (the "opencode Enter"
 	// launcher line is the other one).
-	enterCount := strings.Count(log, "send-keys -t %42 Enter\n")
+	enterCount := strings.Count(log, "Enter\n")
 	if enterCount != 2 {
 		t.Fatalf("Start() sent %d Enter key presses (want 2: one to launch opencode, one to submit the prompt); in-prompt newlines must be replaced with spaces, not Enter (would submit prematurely):\n%s", enterCount, log)
 	}
@@ -470,19 +477,88 @@ esac
 		t.Fatalf("Start() error = %v", err)
 	}
 
-	time.Sleep(300 * time.Millisecond)
-
-	raw, err := os.ReadFile(logFile)
-	if err != nil {
-		t.Fatalf("read tmux log: %v", err)
+	deadline := time.Now().Add(3 * time.Second)
+	var log string
+	for time.Now().Before(deadline) {
+		raw, err := os.ReadFile(logFile)
+		if err == nil {
+			log = string(raw)
+			if strings.Contains(log, "send-keys -t %42 Enter") && strings.Count(log, "send-keys -t %42 Enter\n") >= 2 {
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
 	}
-	log := string(raw)
 
 	if strings.Contains(log, "freecode run") {
 		t.Fatalf("Start() launched freecode in headless 'run' subcommand mode, must open its interactive TUI:\n%s", log)
 	}
 	if !strings.Contains(log, "send-keys -t %42 freecode Enter") {
 		t.Fatalf("Start() did not launch the interactive freecode binary:\n%s", log)
+	}
+	if !strings.Contains(log, "send-keys -t %42 -l") {
+		t.Fatalf("Start() did not inject the prompt character-by-character:\n%s", log)
+	}
+}
+
+func TestPtyRunnerStartLaunchesAntigravityTUIAndInjectsPrompt(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-test,123,0")
+
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	tmuxDir := t.TempDir()
+	logFile := filepath.Join(tmuxDir, "tmux.log")
+	t.Setenv("FAKE_TMUX_LOG_ANTIGRAVITY", logFile)
+	t.Setenv("PATH", tmuxDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	fakeTmux := `#!/bin/sh
+printf '%s\n' "$*" >> "$FAKE_TMUX_LOG_ANTIGRAVITY"
+case "$1" in
+  new-window)
+    printf '%%42\n'
+    ;;
+  capture-pane)
+    printf 'Antigravity CLI 1.1.13\n> \n? for shortcuts\n'
+    ;;
+  list-panes)
+    exit 1
+    ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(tmuxDir, "tmux"), []byte(fakeTmux), 0755); err != nil {
+		t.Fatalf("write fake tmux: %v", err)
+	}
+
+	runner, err := NewTmuxAgentRunner("agentboard")
+	if err != nil {
+		t.Fatalf("NewTmuxAgentRunner() error = %v", err)
+	}
+
+	_, err = runner.Start(context.Background(), RunRequest{
+		SessionID: "session-antigravity",
+		Agent:     "antigravity",
+		Prompt:    "Greet me",
+	})
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	deadline := time.Now().Add(3 * time.Second)
+	var log string
+	for time.Now().Before(deadline) {
+		raw, err := os.ReadFile(logFile)
+		if err == nil {
+			log = string(raw)
+			if strings.Contains(log, "send-keys -t %42 Enter") && strings.Count(log, "send-keys -t %42 Enter\n") >= 2 {
+				break
+			}
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	if !strings.Contains(log, "send-keys -t %42 agy Enter") {
+		t.Fatalf("Start() did not launch the interactive agy binary:\n%s", log)
 	}
 	if !strings.Contains(log, "send-keys -t %42 -l") {
 		t.Fatalf("Start() did not inject the prompt character-by-character:\n%s", log)

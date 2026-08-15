@@ -27,6 +27,7 @@ var agentSpecs = []agentSpec{
 	{name: "codex", binary: "codex", logo: " ▗▄▄▄▖\n ▐▝▞▙▌\n ▝▀▀▀▘", logoClr: "#10A37F"},
 	{name: "cursor", binary: "cursor", logo: " ▛▀▀▀▜\n ▌ ▗▖ ▐\n ▙▄▄▄▟", logoClr: "#F0DB4F"},
 	{name: "freecode", binary: "freecode", logo: "   █▀▀ \n   █▀▀ \n   ▀   ", logoClr: "#e7c98a"},
+	{name: "antigravity", binary: "agy", logo: "  ▞▀▀▚  \n ▐▛▀▀▜▌ \n ▝▘  ▝▘ ", logoClr: "#4285F4"},
 }
 
 func DetectAgents() []DetectedAgent {
@@ -50,7 +51,7 @@ func DetectAgents() []DetectedAgent {
 
 func AgentColor(name string) string {
 	for _, spec := range agentSpecs {
-		if spec.name == name {
+		if spec.name == name || spec.binary == name {
 			return spec.logoClr
 		}
 	}

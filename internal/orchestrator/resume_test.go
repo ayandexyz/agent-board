@@ -35,6 +35,21 @@ func TestExtractResumeCommand(t *testing.T) {
 			want:   "freecode --resume sess-42",
 		},
 		{
+			name:   "agy conversation resume",
+			output: "Session saved.\nResume with: agy --conversation conv_987654321",
+			want:   "agy --conversation conv_987654321",
+		},
+		{
+			name:   "agy continue resume",
+			output: "To continue the conversation, run: agy --continue",
+			want:   "agy --continue",
+		},
+		{
+			name:   "antigravity resume",
+			output: "Resume this session with:\nantigravity --resume agy-sess-001",
+			want:   "antigravity --resume agy-sess-001",
+		},
+		{
 			name:   "no resume command",
 			output: "Agent completed successfully",
 			want:   "",
