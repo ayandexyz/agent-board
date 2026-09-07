@@ -10,6 +10,8 @@ func (s *Store) migrate() error {
 		priority    TEXT DEFAULT 'medium',
 		agent       TEXT DEFAULT '',
 		branch      TEXT DEFAULT '',
+		worktree_path TEXT DEFAULT '',
+		pr_url      TEXT DEFAULT '',
 		tags        TEXT DEFAULT '[]',
 		depends_on  TEXT DEFAULT '[]',
 		created_at  DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -87,6 +89,22 @@ func (s *Store) migrate() error {
 	err = s.db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('tickets') WHERE name='resume_command'").Scan(&hasCol)
 	if err == nil && !hasCol {
 		_, err = s.db.Exec("ALTER TABLE tickets ADD COLUMN resume_command TEXT")
+		if err != nil {
+			return err
+		}
+	}
+
+	err = s.db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('tickets') WHERE name='worktree_path'").Scan(&hasCol)
+	if err == nil && !hasCol {
+		_, err = s.db.Exec("ALTER TABLE tickets ADD COLUMN worktree_path TEXT DEFAULT ''")
+		if err != nil {
+			return err
+		}
+	}
+
+	err = s.db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('tickets') WHERE name='pr_url'").Scan(&hasCol)
+	if err == nil && !hasCol {
+		_, err = s.db.Exec("ALTER TABLE tickets ADD COLUMN pr_url TEXT DEFAULT ''")
 		if err != nil {
 			return err
 		}

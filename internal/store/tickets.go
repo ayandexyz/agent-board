@@ -16,6 +16,8 @@ type Ticket struct {
 	Priority      string
 	Agent         string
 	Branch        string
+	WorktreePath  string
+	PRURL         string
 	Tags          []string
 	DependsOn     []string
 	AgentActive   bool
@@ -42,6 +44,8 @@ type ticketRow struct {
 	Priority      string
 	Agent         string
 	Branch        string
+	WorktreePath  string
+	PRURL         string
 	Tags          string
 	DependsOn     string
 	AgentActive   bool
@@ -71,6 +75,8 @@ func (r ticketRow) toTicket() (Ticket, error) {
 		Priority:      r.Priority,
 		Agent:         r.Agent,
 		Branch:        r.Branch,
+		WorktreePath:  r.WorktreePath,
+		PRURL:         r.PRURL,
 		Tags:          tags,
 		DependsOn:     dependsOn,
 		AgentActive:   r.AgentActive,
@@ -148,9 +154,9 @@ func (s *Store) CreateTicket(ctx context.Context, t Ticket) (Ticket, error) {
 	t.UpdatedAt = now
 
 	_, err = s.db.ExecContext(ctx,
-		`INSERT INTO tickets (id, title, prompt, status, priority, agent, branch, tags, depends_on, agent_active, resume_command, created_at, updated_at)
-		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-		t.ID, t.Title, t.Prompt, t.Status, t.Priority, t.Agent, t.Branch, string(tags), string(deps), t.AgentActive, t.ResumeCommand, t.CreatedAt, t.UpdatedAt,
+		`INSERT INTO tickets (id, title, prompt, status, priority, agent, branch, worktree_path, pr_url, tags, depends_on, agent_active, resume_command, created_at, updated_at)
+		 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		t.ID, t.Title, t.Prompt, t.Status, t.Priority, t.Agent, t.Branch, t.WorktreePath, t.PRURL, string(tags), string(deps), t.AgentActive, t.ResumeCommand, t.CreatedAt, t.UpdatedAt,
 	)
 	if err != nil {
 		return Ticket{}, fmt.Errorf("store.createTicket: %w", err)
@@ -162,9 +168,9 @@ func (s *Store) CreateTicket(ctx context.Context, t Ticket) (Ticket, error) {
 func (s *Store) GetTicket(ctx context.Context, id string) (Ticket, error) {
 	var r ticketRow
 	err := s.db.QueryRowContext(ctx,
-		"SELECT id, title, prompt, status, priority, agent, branch, tags, depends_on, agent_active, resume_command, created_at, updated_at FROM tickets WHERE id = ?",
+		"SELECT id, title, prompt, status, priority, agent, branch, worktree_path, pr_url, tags, depends_on, agent_active, resume_command, created_at, updated_at FROM tickets WHERE id = ?",
 		id,
-	).Scan(&r.ID, &r.Title, &r.Prompt, &r.Status, &r.Priority, &r.Agent, &r.Branch, &r.Tags, &r.DependsOn, &r.AgentActive, &r.ResumeCommand, &r.CreatedAt, &r.UpdatedAt)
+	).Scan(&r.ID, &r.Title, &r.Prompt, &r.Status, &r.Priority, &r.Agent, &r.Branch, &r.WorktreePath, &r.PRURL, &r.Tags, &r.DependsOn, &r.AgentActive, &r.ResumeCommand, &r.CreatedAt, &r.UpdatedAt)
 	if err == sql.ErrNoRows {
 		return Ticket{}, fmt.Errorf("store.getTicket %s: %w", id, ErrNotFound)
 	}
@@ -181,7 +187,7 @@ func (s *Store) GetTicket(ctx context.Context, id string) (Ticket, error) {
 }
 
 func (s *Store) ListTickets(ctx context.Context, filters TicketFilters) ([]Ticket, error) {
-	query := "SELECT id, title, prompt, status, priority, agent, branch, tags, depends_on, agent_active, resume_command, created_at, updated_at FROM tickets WHERE 1=1"
+	query := "SELECT id, title, prompt, status, priority, agent, branch, worktree_path, pr_url, tags, depends_on, agent_active, resume_command, created_at, updated_at FROM tickets WHERE 1=1"
 	var args []interface{}
 
 	if filters.Status != "" {
@@ -225,7 +231,7 @@ func (s *Store) ListTickets(ctx context.Context, filters TicketFilters) ([]Ticke
 	var tickets []Ticket
 	for rows.Next() {
 		var r ticketRow
-		if err := rows.Scan(&r.ID, &r.Title, &r.Prompt, &r.Status, &r.Priority, &r.Agent, &r.Branch, &r.Tags, &r.DependsOn, &r.AgentActive, &r.ResumeCommand, &r.CreatedAt, &r.UpdatedAt); err != nil {
+		if err := rows.Scan(&r.ID, &r.Title, &r.Prompt, &r.Status, &r.Priority, &r.Agent, &r.Branch, &r.WorktreePath, &r.PRURL, &r.Tags, &r.DependsOn, &r.AgentActive, &r.ResumeCommand, &r.CreatedAt, &r.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("store.listTickets: %w", err)
 		}
 		ticket, err := r.toTicket()
@@ -258,8 +264,8 @@ func (s *Store) UpdateTicket(ctx context.Context, t Ticket) (Ticket, error) {
 	t.UpdatedAt = time.Now()
 
 	result, err := s.db.ExecContext(ctx,
-		`UPDATE tickets SET title=?, prompt=?, status=?, priority=?, agent=?, branch=?, tags=?, depends_on=?, agent_active=?, resume_command=?, updated_at=? WHERE id=?`,
-		t.Title, t.Prompt, t.Status, t.Priority, t.Agent, t.Branch, string(tags), string(deps), t.AgentActive, t.ResumeCommand, t.UpdatedAt, t.ID,
+		`UPDATE tickets SET title=?, prompt=?, status=?, priority=?, agent=?, branch=?, worktree_path=?, pr_url=?, tags=?, depends_on=?, agent_active=?, resume_command=?, updated_at=? WHERE id=?`,
+		t.Title, t.Prompt, t.Status, t.Priority, t.Agent, t.Branch, t.WorktreePath, t.PRURL, string(tags), string(deps), t.AgentActive, t.ResumeCommand, t.UpdatedAt, t.ID,
 	)
 	if err != nil {
 		return Ticket{}, fmt.Errorf("store.updateTicket: %w", err)
@@ -349,6 +355,51 @@ func (s *Store) GetResumeCommand(ctx context.Context, id string) (string, error)
 		return "", fmt.Errorf("get resume command: %w", err)
 	}
 	return cmd, nil
+}
+
+func (s *Store) SetBranch(ctx context.Context, id, branch string) error {
+	result, err := s.db.ExecContext(ctx, "UPDATE tickets SET branch = ?, updated_at = ? WHERE id = ?",
+		branch, time.Now(), id)
+	if err != nil {
+		return fmt.Errorf("store.setBranch: %w", err)
+	}
+
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return fmt.Errorf("store.setBranch %s: %w", id, ErrNotFound)
+	}
+
+	return nil
+}
+
+func (s *Store) SetWorktreePath(ctx context.Context, id, path string) error {
+	result, err := s.db.ExecContext(ctx, "UPDATE tickets SET worktree_path = ?, updated_at = ? WHERE id = ?",
+		path, time.Now(), id)
+	if err != nil {
+		return fmt.Errorf("store.setWorktreePath: %w", err)
+	}
+
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return fmt.Errorf("store.setWorktreePath %s: %w", id, ErrNotFound)
+	}
+
+	return nil
+}
+
+func (s *Store) SetPRURL(ctx context.Context, id, url string) error {
+	result, err := s.db.ExecContext(ctx, "UPDATE tickets SET pr_url = ?, updated_at = ? WHERE id = ?",
+		url, time.Now(), id)
+	if err != nil {
+		return fmt.Errorf("store.setPRURL: %w", err)
+	}
+
+	affected, _ := result.RowsAffected()
+	if affected == 0 {
+		return fmt.Errorf("store.setPRURL %s: %w", id, ErrNotFound)
+	}
+
+	return nil
 }
 
 func (s *Store) MoveStatus(ctx context.Context, id string, status string) error {
