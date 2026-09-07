@@ -38,6 +38,7 @@ func (km *KeyMap) GetByAction(action Action) (key string) {
 func (km *KeyMap) TicketViewHelp() string {
 	actions := []Action{
 		ActionCycleStatus,       // s: cycle status
+		ActionMergeTicket,       // m: merge ticket
 		ActionGenerateProposal,  // c: generate proposal
 		ActionAssignAgent,       // A: assign agent
 		ActionSetPriority,       // p: set priority
@@ -107,6 +108,7 @@ func DefaultKeyMap() KeyMap {
 			{Key: "a", Action: ActionAddTicket, Description: "add ticket"},
 			{Key: "d", Action: ActionDeleteTicket, Description: "delete ticket"},
 			{Key: "s", Action: ActionCycleStatus, Description: "cycle status"},
+			{Key: "m", Action: ActionMergeTicket, Description: "merge ticket"},
 			{Key: "x", Action: ActionStopAgent, Description: "stop agent"},
 			{Key: "r", Action: ActionStartRun, Description: "start run"},
 			{Key: "R", Action: ActionRefresh, Description: "refresh"},

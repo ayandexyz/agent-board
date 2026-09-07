@@ -333,6 +333,22 @@ func (m TicketViewModel) handleViewKey(msg tea.KeyMsg) (TicketViewModel, tea.Cmd
 		if m.ticket != nil {
 			return m.cycleStatus()
 		}
+	case keybinding.ActionMergeTicket:
+		if m.ticket != nil {
+			if m.ticket.Status != "review" {
+				return m, func() tea.Msg {
+					return notificationMsg{
+						title:   "Cannot merge",
+						message: "Only tickets in Review can be merged",
+						variant: NotificationInfo,
+					}
+				}
+			}
+			ticketID := m.ticket.ID
+			return m, func() tea.Msg {
+				return mergeTicketRequestMsg{ticketID: ticketID}
+			}
+		}
 	case keybinding.ActionGenerateProposal:
 		if m.ticket != nil {
 			ticketID := m.ticket.ID

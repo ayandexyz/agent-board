@@ -22,6 +22,16 @@ type fakeOrchestrator struct {
 	store                      *store.Store
 	lastCreateProposalTicketID string
 	completionCh               chan orchestrator.RunCompletion
+
+	moveStatusErr     error
+	lastMoveTicketID  string
+	lastMoveStatus    string
+	mergeResult       orchestrator.MergeResult
+	mergeErr          error
+	mergeCalled       bool
+	lastMergeStrategy orchestrator.MergeStrategy
+	deleteErr         error
+	lastDeletedTicket string
 }
 
 func newFakeOrchestrator(s *store.Store) *fakeOrchestrator {
@@ -110,6 +120,29 @@ func (f *fakeOrchestrator) StartAdHocRun(ctx context.Context, ticketID, agent, p
 		return store.Session{}, err
 	}
 	return session, nil
+}
+
+func (f *fakeOrchestrator) MoveTicketStatus(ctx context.Context, ticketID, newStatus string) error {
+	if f.moveStatusErr != nil {
+		return f.moveStatusErr
+	}
+	f.lastMoveTicketID = ticketID
+	f.lastMoveStatus = newStatus
+	return f.store.MoveStatus(ctx, ticketID, newStatus)
+}
+
+func (f *fakeOrchestrator) MergeTicket(ctx context.Context, ticketID string, strategy orchestrator.MergeStrategy) (orchestrator.MergeResult, error) {
+	f.mergeCalled = true
+	f.lastMergeStrategy = strategy
+	return f.mergeResult, f.mergeErr
+}
+
+func (f *fakeOrchestrator) DeleteTicket(ctx context.Context, ticketID string) error {
+	if f.deleteErr != nil {
+		return f.deleteErr
+	}
+	f.lastDeletedTicket = ticketID
+	return f.store.DeleteTicket(ctx, ticketID)
 }
 
 func (f *fakeOrchestrator) completeRun(ticketID, sessionID, outcome string) {

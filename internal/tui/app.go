@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log"
 	"os"
@@ -135,6 +136,9 @@ type Orchestrator interface {
 	ApproveProposal(ctx context.Context, proposalID string) error
 	StartApprovedRun(ctx context.Context, proposalID string) (store.Session, error)
 	StartAdHocRun(ctx context.Context, ticketID, agent, prompt string) (store.Session, error)
+	MoveTicketStatus(ctx context.Context, ticketID, newStatus string) error
+	MergeTicket(ctx context.Context, ticketID string, strategy orchestrator.MergeStrategy) (orchestrator.MergeResult, error)
+	DeleteTicket(ctx context.Context, ticketID string) error
 	FinishRun(ctx context.Context, input orchestrator.FinishRunInput) error
 	GetLogs(sessionID string) []string
 	SendInput(sessionID, input string) error
@@ -161,6 +165,7 @@ type App struct {
 	view         viewMode
 	palette      CommandPalette
 	modal        ConfirmModal
+	mergeModal   MergeModal
 	textInput    TextInputModal
 	notification NotificationStack
 	quit         bool
@@ -226,6 +231,8 @@ func NewApp(cfg *config.Config, s *store.Store, reg *theme.Registry, deps AppDep
 
 	a.modal = ConfirmModal{}
 	a.modal.SetTheme(t)
+	a.mergeModal = MergeModal{}
+	a.mergeModal.SetTheme(t)
 	a.textInput = TextInputModal{}
 	a.textInput.SetTheme(t)
 	a.notification = NotificationStack{}
@@ -242,6 +249,7 @@ func (a *App) applyTheme() {
 	a.dashboard.styles = NewDashboardStyles(t)
 	a.palette.SetTheme(t)
 	a.modal.SetTheme(t)
+	a.mergeModal.SetTheme(t)
 	a.textInput.SetTheme(t)
 	a.notification.SetTheme(t)
 }
@@ -266,6 +274,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.dashboard, _ = a.dashboard.Update(msg)
 		a.palette, _ = a.palette.Update(msg)
 		a.modal.SetSize(a.width, a.height)
+		a.mergeModal.SetSize(a.width, a.height)
 		a.textInput.SetSize(a.width, a.height)
 		a.notification.SetSize(a.width, a.height)
 		return a, nil
@@ -386,9 +395,17 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 		return a, nil
 	case deleteTicketConfirmMsg:
-		_ = a.store.DeleteTicket(context.Background(), msg.ticketID)
+		if err := a.orchestrator.DeleteTicket(context.Background(), msg.ticketID); err != nil {
+			return a, a.showNotification("Delete refused", err.Error(), NotificationError)
+		}
 		a.kanban, _ = a.kanban.Reload()
 		return a, nil
+	case mergeTicketRequestMsg:
+		return a.handleStatusChanged(statusChangedMsg{ticketID: msg.ticketID, newStatus: "done"})
+	case mergeConfirmMsg:
+		return a, a.mergeTicketCmd(msg.ticketID, msg.strategy)
+	case mergeResultMsg:
+		return a.handleMergeResult(msg)
 	case deleteTicketRequestMsg:
 		ticketID := msg.ticketID
 		a.modal.Open(
@@ -527,9 +544,20 @@ func (a *App) startDirectRunAndListenCmd(ticketID, agent, prompt string) tea.Cmd
 }
 
 func (a *App) handleStatusChanged(msg statusChangedMsg) (tea.Model, tea.Cmd) {
-	// First update the store
-	err := a.store.MoveStatus(context.Background(), msg.ticketID, msg.newStatus)
+	err := a.orchestrator.MoveTicketStatus(context.Background(), msg.ticketID, msg.newStatus)
 	if err != nil {
+		var mergeReq *orchestrator.MergeRequiredError
+		if errors.As(err, &mergeReq) {
+			if mergeReq.PRURL != "" {
+				return a, a.showNotification(
+					"PR not merged yet",
+					fmt.Sprintf("%s has an open PR: %s", msg.ticketID, mergeReq.PRURL),
+					NotificationInfo,
+				)
+			}
+			a.mergeModal.Open(mergeReq.TicketID, mergeReq.Branch, mergeReq.Strategy)
+			return a, nil
+		}
 		return a, a.showNotification("Error", err.Error(), NotificationError)
 	}
 
@@ -546,6 +574,56 @@ func (a *App) handleStatusChanged(msg statusChangedMsg) (tea.Model, tea.Cmd) {
 	}
 
 	return a, tea.Batch(cmds...)
+}
+
+func (a *App) mergeTicketCmd(ticketID string, strategy orchestrator.MergeStrategy) tea.Cmd {
+	return func() tea.Msg {
+		res, err := a.orchestrator.MergeTicket(context.Background(), ticketID, strategy)
+		return mergeResultMsg{ticketID: ticketID, result: res, err: err}
+	}
+}
+
+func (a *App) handleMergeResult(msg mergeResultMsg) (tea.Model, tea.Cmd) {
+	if msg.err != nil {
+		return a, a.showNotification("Merge failed", msg.err.Error(), NotificationError)
+	}
+
+	switch msg.result.Outcome {
+	case orchestrator.MergeOutcomeMerged:
+		a.kanban, _ = a.kanban.Reload()
+		if a.activeTicket != nil && a.activeTicket.ID == msg.ticketID {
+			if updated, err := a.store.GetTicket(context.Background(), msg.ticketID); err == nil {
+				a.activeTicket = &updated
+				a.ticketView = a.ticketView.SetTicket(&updated)
+			}
+		}
+		return a, a.showNotification(
+			"Merged",
+			fmt.Sprintf("%s merged into main, worktree cleaned up", msg.ticketID),
+			NotificationSuccess,
+		)
+	case orchestrator.MergeOutcomePRCreated:
+		a.kanban, _ = a.kanban.Reload()
+		return a, a.showNotification(
+			"PR created",
+			fmt.Sprintf("%s: %s", msg.ticketID, msg.result.PRURL),
+			NotificationSuccess,
+		)
+	case orchestrator.MergeOutcomeConflict:
+		return a, a.showNotification(
+			"Merge conflict",
+			fmt.Sprintf("%s stays in review: %s", msg.ticketID, msg.result.Detail),
+			NotificationError,
+		)
+	case orchestrator.MergeOutcomeDirty:
+		return a, a.showNotification(
+			"Cannot merge",
+			msg.result.Detail,
+			NotificationError,
+		)
+	default:
+		return a, a.showNotification("Merge", msg.result.Detail, NotificationInfo)
+	}
 }
 
 func (a *App) handleGenerateProposal(msg generateProposalMsg) (tea.Model, tea.Cmd) {
@@ -578,6 +656,11 @@ func (a *App) createProposalCmd(ticketID string) tea.Cmd {
 }
 
 func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if a.mergeModal.Active() {
+		var cmd tea.Cmd
+		a.mergeModal, cmd = a.mergeModal.Update(msg)
+		return a, cmd
+	}
 	if a.modal.Active() {
 		var cmd tea.Cmd
 		a.modal, cmd = a.modal.Update(msg)
@@ -827,6 +910,42 @@ func (a *App) View() string {
 			}
 		}
 		mainView = finalView.String()
+	}
+
+	if a.mergeModal.Active() {
+		modalBox := a.mergeModal.ViewBox()
+		modalHeight := lipgloss.Height(modalBox)
+		modalWidth := lipgloss.Width(modalBox)
+		bgLines := strings.Split(mainView, "\n")
+
+		for len(bgLines) < a.height {
+			bgLines = append(bgLines, "")
+		}
+
+		startY := (a.height - modalHeight) / 2
+		startX := (a.width - modalWidth) / 2
+
+		var finalView strings.Builder
+		modalLines := strings.Split(modalBox, "\n")
+
+		for i := 0; i < a.height; i++ {
+			bgLine := ""
+			if i < len(bgLines) {
+				bgLine = bgLines[i]
+			}
+
+			if i >= startY && i < startY+modalHeight {
+				row := i - startY
+				modalLine := modalLines[row]
+				finalView.WriteString(overlayLine(bgLine, modalLine, startX))
+			} else {
+				finalView.WriteString(bgLine)
+			}
+			if i < a.height-1 {
+				finalView.WriteString("\n")
+			}
+		}
+		return finalView.String()
 	}
 
 	if a.modal.Active() {
