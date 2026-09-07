@@ -1,12 +1,14 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
 
 	"github.com/ayan-de/agent-board/internal/config"
+	"github.com/ayan-de/agent-board/internal/git"
 	"github.com/ayan-de/agent-board/internal/llm"
 	"github.com/ayan-de/agent-board/internal/mcp"
 	"github.com/ayan-de/agent-board/internal/orchestrator"
@@ -76,6 +78,22 @@ func runTUI() int {
 	orch := orchestrator.NewService(s, llmClient, runner, ctxCarry)
 	if agentRunner != nil {
 		orch.SetAgentRunner(agentRunner)
+	}
+
+	g := git.New(git.ExecRunner())
+	if cwd, err := os.Getwd(); err == nil {
+		if repoRoot, err := g.RepoRoot(context.Background(), cwd); err == nil {
+			wm := orchestrator.NewWorktreeManager(
+				g,
+				git.NewGH(git.ExecRunner()),
+				repoRoot,
+				cfg.Git.ResolvedWorktreeRoot(config.GetBaseDir(), cfg.ProjectName),
+				cfg.Git.BranchPrefix,
+				cfg.Git.BaseBranch,
+			)
+			orch.SetWorktrees(wm)
+			orch.SetMergeConfig(orchestrator.MergeStrategy(cfg.Git.MergeStrategy))
+		}
 	}
 
 	reg := theme.NewRegistry("dark")
