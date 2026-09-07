@@ -16,7 +16,10 @@ type Service struct {
 	runner     Runner
 	agentRunner  AgentRunner
 	ctx        ContextCarryProvider
-	logs       map[string][]string
+	worktrees     Worktrees
+	merger        Merger
+	mergeStrategy MergeStrategy
+	logs          map[string][]string
 	mu         sync.RWMutex
 
 	activeSessions map[string]*AgentSession
@@ -25,13 +28,14 @@ type Service struct {
 
 // AgentSession tracks an active agent session
 type AgentSession struct {
-	SessionID string
-	TicketID  string
-	Agent     string
-	StartedAt int64
-	Status    string
-	PaneID    string
-	WindowID  string
+	SessionID    string
+	TicketID     string
+	Agent        string
+	StartedAt    int64
+	Status       string
+	PaneID       string
+	WindowID     string
+	WorktreePath string
 }
 
 func NewService(store Store, llm LLMClient, runner Runner, ctx ContextCarryProvider) *Service {
@@ -50,6 +54,44 @@ func (s *Service) SetAgentRunner(pr AgentRunner) {
 	s.agentRunner = pr
 }
 
+func (s *Service) SetWorktrees(w Worktrees) {
+	s.worktrees = w
+	if m, ok := w.(Merger); ok {
+		s.merger = m
+	}
+}
+
+func (s *Service) prepareWorkDir(ctx context.Context, ticketID, sessionID string) (string, error) {
+	if s.worktrees == nil || ticketID == "" {
+		return "", nil
+	}
+	ticket, err := s.store.GetTicket(ctx, ticketID)
+	if err != nil {
+		return "", err
+	}
+	info, err := s.worktrees.Ensure(ctx, ticket)
+	if err != nil {
+		return "", fmt.Errorf("orchestrator.prepareWorkDir: %w", err)
+	}
+	if err := s.store.SetWorktreePath(ctx, ticketID, info.Path); err != nil {
+		return "", err
+	}
+	if ticket.Branch == "" && info.Branch != "" {
+		if err := s.store.SetBranch(ctx, ticketID, info.Branch); err != nil {
+			return "", err
+		}
+	}
+	if info.Created {
+		_, _ = s.store.CreateEvent(ctx, store.Event{
+			TicketID:  ticketID,
+			SessionID: sessionID,
+			Kind:      "worktree.created",
+			Payload:   info.Path,
+		})
+	}
+	return info.Path, nil
+}
+
 func (s *Service) StartAdHocRun(ctx context.Context, ticketID, agent, prompt string) (store.Session, error) {
 	session, err := s.store.CreateSession(ctx, store.Session{
 		TicketID: ticketID,
@@ -64,6 +106,15 @@ func (s *Service) StartAdHocRun(ctx context.Context, ticketID, agent, prompt str
 		if err := s.store.SetAgentActive(ctx, ticketID, true); err != nil {
 			return store.Session{}, err
 		}
+	}
+
+	workDir, err := s.prepareWorkDir(ctx, ticketID, session.ID)
+	if err != nil {
+		_ = s.store.EndSession(ctx, session.ID, "failed")
+		if ticketID != "" {
+			_ = s.store.SetAgentActive(ctx, ticketID, false)
+		}
+		return store.Session{}, err
 	}
 
 	onComplete := func(outcome, summary, resumeCommand string) {
@@ -90,6 +141,7 @@ func (s *Service) StartAdHocRun(ctx context.Context, ticketID, agent, prompt str
 			SessionID:  session.ID,
 			Agent:      agent,
 			Prompt:     prompt,
+			WorkDir:    workDir,
 			Reporter:   func(line string) { s.AppendLog(session.ID, line) },
 			OnComplete: onComplete,
 		})
@@ -107,11 +159,12 @@ func (s *Service) StartAdHocRun(ctx context.Context, ticketID, agent, prompt str
 
 	s.mu.Lock()
 	s.activeSessions[session.ID] = &AgentSession{
-		SessionID: session.ID,
-		TicketID:  ticketID,
-		Agent:     agent,
-		StartedAt: session.StartedAt.Unix(),
-		Status:    "running",
+		SessionID:    session.ID,
+		TicketID:     ticketID,
+		Agent:        agent,
+		StartedAt:    session.StartedAt.Unix(),
+		Status:       "running",
+		WorktreePath: workDir,
 	}
 	s.mu.Unlock()
 
@@ -133,7 +186,7 @@ func (s *Service) CompletionChan() <-chan RunCompletion {
 	return s.completionCh
 }
 
-func (s Service) CreateProposal(ctx context.Context, input CreateProposalInput) (store.Proposal, error) {
+func (s *Service) CreateProposal(ctx context.Context, input CreateProposalInput) (store.Proposal, error) {
 	if s.store == nil {
 		return store.Proposal{}, fmt.Errorf("orchestrator.createProposal: store not configured")
 	}
@@ -212,6 +265,13 @@ func (s *Service) StartApprovedRun(ctx context.Context, proposalID string) (stor
 		return store.Session{}, err
 	}
 
+	workDir, err := s.prepareWorkDir(ctx, proposal.TicketID, session.ID)
+	if err != nil {
+		_ = s.store.EndSession(ctx, session.ID, "failed")
+		_ = s.store.SetAgentActive(ctx, proposal.TicketID, false)
+		return store.Session{}, err
+	}
+
 	onComplete := func(outcome, summary, resumeCommand string) {
 		_ = s.FinishRun(context.Background(), FinishRunInput{
 			TicketID:  proposal.TicketID,
@@ -236,6 +296,7 @@ func (s *Service) StartApprovedRun(ctx context.Context, proposalID string) (stor
 			SessionID:  session.ID,
 			Agent:      proposal.Agent,
 			Prompt:     proposal.Prompt,
+			WorkDir:    workDir,
 			Reporter:   func(line string) { s.AppendLog(session.ID, line) },
 			OnComplete: onComplete,
 		})
@@ -251,11 +312,12 @@ func (s *Service) StartApprovedRun(ctx context.Context, proposalID string) (stor
 
 	s.mu.Lock()
 	s.activeSessions[session.ID] = &AgentSession{
-		SessionID: session.ID,
-		TicketID:  proposal.TicketID,
-		Agent:     proposal.Agent,
-		StartedAt: session.StartedAt.Unix(),
-		Status:    "running",
+		SessionID:    session.ID,
+		TicketID:     proposal.TicketID,
+		Agent:        proposal.Agent,
+		StartedAt:    session.StartedAt.Unix(),
+		Status:       "running",
+		WorktreePath: workDir,
 	}
 	s.mu.Unlock()
 

@@ -144,8 +144,12 @@ func (pm *PaneManager) CreatePane(ctx context.Context, req RunRequest) (*AgentPa
 
 	// Create a new window and capture both window_id and pane_id in one command
 	// Format: "window_id:pane_id" e.g. "@1:%1"
-	windowCmd := exec.Command(pm.tmux, "new-window", "-t", mainSession,
-		"-n", windowName, "-d", "-P", "-F", "#{window_id}:#{pane_id}")
+	windowArgs := []string{"new-window", "-t", mainSession,
+		"-n", windowName, "-d", "-P", "-F", "#{window_id}:#{pane_id}"}
+	if req.WorkDir != "" {
+		windowArgs = append(windowArgs, "-c", req.WorkDir)
+	}
+	windowCmd := exec.Command(pm.tmux, windowArgs...)
 	output, err := windowCmd.Output()
 	if err != nil {
 		cancel()

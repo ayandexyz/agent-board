@@ -21,6 +21,14 @@ func NewTmuxAgentRunner(tmuxSession string) (*tmuxAgentRunner, error) {
 	}, nil
 }
 
+func newWindowArgs(sessionName, windowName, workDir string) []string {
+	args := []string{"new-window", "-t", sessionName, "-d", "-a", "-P", "-F", "#{window_id}:#{pane_id}", "-n", windowName}
+	if workDir != "" {
+		args = append(args, "-c", workDir)
+	}
+	return args
+}
+
 func (r *tmuxAgentRunner) Start(ctx context.Context, req RunRequest) (RunHandle, error) {
 	sessionName := r.sessionName
 	if sessionName == "" {
@@ -29,7 +37,7 @@ func (r *tmuxAgentRunner) Start(ctx context.Context, req RunRequest) (RunHandle,
 
 	windowName := fmt.Sprintf("agent-%s", shortID(req.SessionID, 8))
 
-	cmd := exec.Command("tmux", "new-window", "-t", sessionName, "-d", "-a", "-P", "-F", "#{window_id}:#{pane_id}", "-n", windowName)
+	cmd := exec.Command("tmux", newWindowArgs(sessionName, windowName, req.WorkDir)...)
 	output, err := cmd.Output()
 	if err != nil {
 		return RunHandle{}, fmt.Errorf("create tmux window: %w", err)

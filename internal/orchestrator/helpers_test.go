@@ -21,6 +21,13 @@ type fakeStore struct {
 	lastContextCarry store.ContextCarry
 	lastSession      store.Session
 	lastEvent        store.Event
+
+	moveStatusErr    error
+	lastBranch       string
+	lastWorktreePath string
+	lastPRURL        string
+	deletedTicketID  string
+	events           []store.Event
 }
 
 func (f *fakeStore) GetTicket(_ context.Context, _ string) (store.Ticket, error) {
@@ -63,13 +70,73 @@ func (f *fakeStore) SetAgentActive(_ context.Context, _ string, active bool) err
 	return nil
 }
 func (f *fakeStore) MoveStatus(_ context.Context, _, status string) error {
+	if f.moveStatusErr != nil {
+		return f.moveStatusErr
+	}
 	f.lastMoveStatus = status
+	f.ticket.Status = status
 	return nil
 }
 func (f *fakeStore) SetResumeCommand(_ context.Context, _, _ string) error { return nil }
+func (f *fakeStore) SetBranch(_ context.Context, _, branch string) error {
+	f.lastBranch = branch
+	f.ticket.Branch = branch
+	return nil
+}
+func (f *fakeStore) SetWorktreePath(_ context.Context, _, path string) error {
+	f.lastWorktreePath = path
+	f.ticket.WorktreePath = path
+	return nil
+}
+func (f *fakeStore) SetPRURL(_ context.Context, _, url string) error {
+	f.lastPRURL = url
+	f.ticket.PRURL = url
+	return nil
+}
+func (f *fakeStore) DeleteTicket(_ context.Context, id string) error {
+	f.deletedTicketID = id
+	return nil
+}
 func (f *fakeStore) CreateEvent(_ context.Context, e store.Event) (store.Event, error) {
 	f.lastEvent = e
+	f.events = append(f.events, e)
 	return e, nil
+}
+
+func (f *fakeStore) hasEventKind(kind string) bool {
+	for _, e := range f.events {
+		if e.Kind == kind {
+			return true
+		}
+	}
+	return false
+}
+
+type fakeWorktrees struct {
+	info       orchestrator.WorktreeInfo
+	ensureErr  error
+	removeErr  error
+	dirty      bool
+	lastTicket store.Ticket
+	removed    []string
+}
+
+func (f *fakeWorktrees) Ensure(_ context.Context, t store.Ticket) (orchestrator.WorktreeInfo, error) {
+	f.lastTicket = t
+	if f.ensureErr != nil {
+		return orchestrator.WorktreeInfo{}, f.ensureErr
+	}
+	return f.info, nil
+}
+func (f *fakeWorktrees) Remove(_ context.Context, path string, _ bool) error {
+	if f.removeErr != nil {
+		return f.removeErr
+	}
+	f.removed = append(f.removed, path)
+	return nil
+}
+func (f *fakeWorktrees) IsDirty(_ context.Context, _ string) (bool, error) {
+	return f.dirty, nil
 }
 
 type fakeLLMClient struct {

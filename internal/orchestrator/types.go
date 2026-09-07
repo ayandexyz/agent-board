@@ -30,9 +30,23 @@ type RunRequest struct {
 	SessionID  string
 	Agent      string
 	Prompt     string
+	WorkDir    string
 	Reporter   func(string)
 	Target     string
 	OnComplete func(outcome, summary, resumeCommand string)
+}
+
+type WorktreeInfo struct {
+	Path    string
+	Branch  string
+	Base    string
+	Created bool
+}
+
+type Worktrees interface {
+	Ensure(ctx context.Context, t store.Ticket) (WorktreeInfo, error)
+	Remove(ctx context.Context, path string, force bool) error
+	IsDirty(ctx context.Context, path string) (bool, error)
 }
 
 type RunHandle struct {
@@ -74,7 +88,11 @@ type Store interface {
 	HasActiveSession(ctx context.Context, ticketID string) bool
 	SetAgentActive(ctx context.Context, id string, active bool) error
 	SetResumeCommand(ctx context.Context, id, cmd string) error
+	SetBranch(ctx context.Context, id, branch string) error
+	SetWorktreePath(ctx context.Context, id, path string) error
+	SetPRURL(ctx context.Context, id, url string) error
 	MoveStatus(ctx context.Context, id, status string) error
+	DeleteTicket(ctx context.Context, id string) error
 	CreateEvent(ctx context.Context, e store.Event) (store.Event, error)
 }
 type ContextCarryProvider interface {
