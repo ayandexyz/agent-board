@@ -23,6 +23,10 @@ func SetDefaults() *Config {
 			RequireApproval: true,
 		},
 		DB: DBConfig{},
+		Git: GitConfig{
+			MergeStrategy: "local",
+			BranchPrefix:  "agent/",
+		},
 		MCP: MCPConfig{
 			NPMPath:  "npm",
 			NodePath: "node",

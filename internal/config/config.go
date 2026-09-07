@@ -16,6 +16,7 @@ type Config struct {
 	LLM     LLMConfig
 	DB      DBConfig
 	MCP     MCPConfig
+	Git     GitConfig
 
 	ConfigPath        string
 	ProjectConfigPath string

@@ -64,6 +64,7 @@ layout = "compact"
 # add_ticket = "a"
 # delete_ticket = "d"
 # start_agent = "s"
+# merge_ticket = "m"
 # stop_agent = "x"
 # refresh = "r"
 # show_help = "?"
@@ -86,6 +87,12 @@ default = "opencode"
 # coordinator_model = "" # defaults to model if empty
 # summarizer_model = ""  # defaults to model if empty
 # require_approval = true
+
+[git]
+# merge_strategy = "local"  # "local" (rebase + ff-only merge) or "pr" (push + gh pr create)
+# worktree_root = ""         # default: ~/.agentboard/worktrees/<project>
+# branch_prefix = "agent/"   # used when a ticket has no branch set
+# base_branch = ""           # default: auto-detect main/master
 
 [mcp]
 npm_path = "npm"

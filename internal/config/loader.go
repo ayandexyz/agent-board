@@ -95,6 +95,18 @@ func applyEnvVars(cfg *Config) {
 	if v := os.Getenv("AGENTBOARD_LLM_SUMMARIZER_MODEL"); v != "" {
 		cfg.LLM.SummarizerModel = v
 	}
+	if v := os.Getenv("AGENTBOARD_GIT_MERGE_STRATEGY"); v != "" {
+		cfg.Git.MergeStrategy = v
+	}
+	if v := os.Getenv("AGENTBOARD_GIT_WORKTREE_ROOT"); v != "" {
+		cfg.Git.WorktreeRoot = v
+	}
+	if v := os.Getenv("AGENTBOARD_GIT_BRANCH_PREFIX"); v != "" {
+		cfg.Git.BranchPrefix = v
+	}
+	if v := os.Getenv("AGENTBOARD_GIT_BASE_BRANCH"); v != "" {
+		cfg.Git.BaseBranch = v
+	}
 	if v := os.Getenv("AGENTBOARD_NPM_PATH"); v != "" {
 		cfg.MCP.NPMPath = v
 	}
