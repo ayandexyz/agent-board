@@ -239,6 +239,43 @@ When viewing dashboard with active sessions ([app.go:474-502](internal/tui/app.g
 
 ---
 
+## Git Worktree Isolation & Merge Flow
+
+Every ticket gets an isolated git worktree when an agent starts on it, so parallel agents never collide on the filesystem.
+
+### Lifecycle
+
+```
+Backlog -> In Progress            -> Review              -> Done
+           worktree + branch         merge gate            worktree removed,
+           created, agent cwd        (modal in TUI)        branch deleted
+```
+
+- **Spawn** (`orchestrator.Service.prepareWorkDir`): `git worktree add ~/.agentboard/worktrees/<project>/<ticket-id> -b agent/<ticket-id> <base>` (branch from `ticket.Branch` if set), tmux window opens with `-c <worktree>`. Path persisted in `tickets.worktree_path`; `worktree.created` event recorded.
+- **Review -> Done is gated**: `Service.MoveTicketStatus` refuses the transition with a typed `*MergeRequiredError` when unmerged work exists; the TUI turns that into a merge confirm modal (press `s` in the modal to switch strategy for this merge). `Service.MergeTicket(ctx, id, strategy)` performs the merge and moves the ticket to done itself.
+- **Strategies** (`[git] merge_strategy`, default `local`):
+  - `local`: rebase the ticket branch onto the base branch *inside the worktree*, then `git merge --ff-only` in the repo root (root must be clean and on the base branch). Conflicts abort the rebase, emit a `merge.conflict` event, and leave the ticket in review.
+  - `pr`: push the branch and `gh pr create`; PR URL stored in `tickets.pr_url`. Moving to done requires the PR to report MERGED (`gh pr view --json state`), then cleanup runs with a forced branch delete (squash-safe).
+- **Guardrails**: merges refuse while an agent session is active; dirty worktrees are never auto-removed (ticket delete also refuses); no git repo -> all of this degrades to the old behavior.
+
+### Key packages
+
+- `internal/git` — pure git/gh command wrappers over an injectable `Runner` closure (`ExecRunner()` in production, fakes in tests; no exec in unit tests).
+- `internal/orchestrator/worktrees.go` — `WorktreeManager` (implements `Worktrees` + `Merger`).
+- `internal/orchestrator/merge.go` — `MergeTicket`, `MoveTicketStatus`, `DeleteTicket`, `MergeRequiredError`.
+- Integration tests against real git: `go test -tags integration ./internal/orchestrator/`.
+
+### Config (`[git]` in config.toml)
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `merge_strategy` | `local` | `local` (rebase + ff-only) or `pr` (push + gh pr create) |
+| `worktree_root` | `~/.agentboard/worktrees/<project>` | Where ticket worktrees live |
+| `branch_prefix` | `agent/` | Branch name prefix when ticket has no branch |
+| `base_branch` | auto-detect `main`/`master` | Merge target |
+
+---
+
 ## MCP Integration
 
 ### ContextCarry
@@ -277,6 +314,7 @@ When viewing dashboard with active sessions ([app.go:474-502](internal/tui/app.g
 | `a` | Add new ticket |
 | `d` | Delete ticket (with confirmation) |
 | `s` | Start agent on selected ticket |
+| `m` | Merge ticket (Review only): opens the merge modal |
 | `x` | Stop running agent |
 | `r` | Refresh board state |
 | `Tab` | Toggle focus between board and agent pane |
@@ -301,6 +339,10 @@ When viewing dashboard with active sessions ([app.go:474-502](internal/tui/app.g
 | `AGENTBOARD_LLM_MODEL` | — | Model name (e.g., `gpt-4o`, `claude-sonnet-4-20250514`) |
 | `AGENTBOARD_LLM_API_KEY` | — | API key for LLM provider |
 | `AGENTBOARD_LLM_BASE_URL` | — | Custom API base URL (for Ollama, etc.) |
+| `AGENTBOARD_GIT_MERGE_STRATEGY` | `local` | Merge strategy: `local`, `pr` |
+| `AGENTBOARD_GIT_WORKTREE_ROOT` | `~/.agentboard/worktrees` | Root dir for ticket worktrees |
+| `AGENTBOARD_GIT_BRANCH_PREFIX` | `agent/` | Branch prefix for generated branches |
+| `AGENTBOARD_GIT_BASE_BRANCH` | auto | Base branch for worktrees and merges |
 | `AGENTBOARD_NPM_PATH` | `npm` | Path to npm binary (for MCP servers) |
 | `AGENTBOARD_NODE_PATH` | `node` | Path to node binary (for MCP servers) |
 | `NO_COLOR` | — | Disable colored output (respects standard env var) |
