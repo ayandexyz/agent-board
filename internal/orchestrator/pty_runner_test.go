@@ -52,14 +52,9 @@ esac
 		t.Fatalf("Start() error = %v", err)
 	}
 
-	time.Sleep(300 * time.Millisecond)
-
-	raw, err := os.ReadFile(logFile)
-	if err != nil {
-		t.Fatalf("read tmux log: %v", err)
-	}
-
-	log := string(raw)
+	log := waitForTmuxLog(t, logFile, func(log string) bool {
+		return strings.Contains(log, "send-keys -t %42 -l")
+	})
 	if strings.Contains(log, "send-keys -t %42 claude run") {
 		t.Fatalf("Start() launched the wrong agent command:\n%s", log)
 	}
@@ -461,14 +456,9 @@ esac
 		t.Fatalf("Start() error = %v", err)
 	}
 
-	time.Sleep(300 * time.Millisecond)
-
-	raw, err := os.ReadFile(logFile)
-	if err != nil {
-		t.Fatalf("read tmux log: %v", err)
-	}
-	log := string(raw)
-
+	log := waitForTmuxLog(t, logFile, func(log string) bool {
+		return strings.Contains(log, "send-keys -t %42 -l")
+	})
 	if strings.Contains(log, "freecode run") {
 		t.Fatalf("Start() launched freecode in headless 'run' subcommand mode, must open its interactive TUI:\n%s", log)
 	}
@@ -511,4 +501,56 @@ func testCtx(t *testing.T) context.Context {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	return ctx
+}
+
+// Claude Code 2.1.251 never prints "bypass permissions on"; its footer reads
+// "auto mode on", "accept edits on", "plan mode on", or nothing at all in the
+// default mode. The banner is what marks the TUI as up.
+func TestPtyRunnerInjectsPromptIntoClaudeCode(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-test,123,0")
+	t.Setenv("HOME", t.TempDir())
+
+	tmuxDir := t.TempDir()
+	logFile := filepath.Join(tmuxDir, "tmux.log")
+	t.Setenv("FAKE_TMUX_LOG_CLAUDE", logFile)
+	t.Setenv("PATH", tmuxDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	// Captured from a real pane running claude 2.1.251.
+	fakeTmux := `#!/bin/sh
+printf '%s\n' "$*" >> "$FAKE_TMUX_LOG_CLAUDE"
+case "$1" in
+  new-window)
+    printf '%%42\n'
+    ;;
+  capture-pane)
+    printf ' claude@2.1.251\n mise ~/.config/mise/config.toml tools: claude@2.1.251\n Claude Code v2.1.251\n Opus 5 (1M context) with medium effort\n ~/.agentboard/worktrees/agent-board/OPEN-68\n>\n  auto mode on (shift+tab to cycle)\n'
+    ;;
+  list-panes)
+    exit 1
+    ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(tmuxDir, "tmux"), []byte(fakeTmux), 0755); err != nil {
+		t.Fatalf("write fake tmux: %v", err)
+	}
+
+	runner, err := NewTmuxAgentRunner("agentboard")
+	if err != nil {
+		t.Fatalf("NewTmuxAgentRunner() error = %v", err)
+	}
+
+	if _, err := runner.Start(testCtx(t), RunRequest{
+		SessionID: "session-claude",
+		Agent:     "claude-code",
+		Prompt:    "Investigate the failing test",
+	}); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	log := waitForTmuxLog(t, logFile, func(log string) bool {
+		return strings.Contains(log, "send-keys -t %42 -l")
+	})
+	if !strings.Contains(log, "send-keys -t %42 -l") {
+		t.Fatalf("Start() never injected the ticket prompt into claude:\n%s", log)
+	}
 }

@@ -123,6 +123,16 @@ func (r *tmuxAgentRunner) injectPrompt(ctx context.Context, paneID, sessionID st
 		return
 	}
 
+	// The ready marker is a banner; the composer that takes the keystrokes can
+	// be a beat behind it.
+	if cfg.ReadyWait > 0 {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(cfg.ReadyWait):
+		}
+	}
+
 	promptBytes, err := os.ReadFile(promptFile)
 	if err != nil {
 		return
@@ -148,7 +158,7 @@ func (r *tmuxAgentRunner) injectPrompt(ctx context.Context, paneID, sessionID st
 }
 
 func waitForReady(ctx context.Context, paneID string, cfg *pty.Config) error {
-	timeout := cfg.ReadyWait
+	timeout := cfg.ReadyTimeout
 	if timeout < 3*time.Second {
 		timeout = 3 * time.Second
 	}
