@@ -76,3 +76,23 @@ Fix: `_pragma=busy_timeout(5000)` and `journal_mode(WAL)` in the DSN.
 
 - `PaneManager.CreatePane` and `PaneManager.monitorPane` are dead in the live wiring; the board always uses `tmuxAgentRunner`. Consider deleting them after bug 3 lands.
 - The effective ready timeout is always 3 s because `waitForReady` takes `max(cfg.ReadyWait, 3s)` and every `ReadyWait` is under 3 s.
+
+---
+
+## Addendum: FreeCode repo (found 2026-09-08 during Phase 5 implementation)
+
+### F1. `registerRtkHook()` is silently unregistered at bootstrap
+
+`apps/core/src/hooks/bootstrap.ts` calls `registerRtkHook()`, which registers with source `"settings"`. `initHooks` then constructs `HookSettingsManager` and calls `load()`, and `apps/core/src/hooks/settings.ts:227` opens with `unregisterAllHooks("settings")`. That wipes the hook that was just registered.
+
+Verified: after `initHooks(root)`, `getHooksForEvent("PreToolUse")` returns `[]`. The rtk bash-rewrite feature has never run through this path, so no bash command is being rewritten to its compact `rtk` equivalent and the token saving it exists for is not being realised. The same trap caught the board webhook, which is why that one registers with source `"session"` instead.
+
+Fix is one word, `"settings"` to `"session"` at the `registerHook` call in `builtin/rtk-rewrite.ts`. Deliberately not applied: it would switch on bash-command rewriting for the first time, which changes what every shell tool call actually executes. That is a behaviour change for the repo owner to make, not a drive-by.
+
+### F2. `npm run check-types` exits 1 without printing an error
+
+In `apps/core`, both `npm run check-types` and `npx tsc --noEmit -p tsconfig.json` exit 1 and print only two `npm notice run` lines. Running the compiler directly (`node node_modules/.pnpm/typescript@5.9.2/node_modules/typescript/bin/tsc --noEmit -p tsconfig.json`) exits 0 with no diagnostics. Present at baseline with no local changes, so some wrapper on `npx`/`npm run` is swallowing the invocation. CI gating on that script would be gating on nothing.
+
+### F3. `unregisterAllHooks()` is called with no argument in tests
+
+`apps/core/src/hooks/hook-payloads.test.ts` calls `unregisterAllHooks()`, but the signature at `registry.ts:156` requires `source`. It typechecks only because the direct-compiler run above is the only thing that would catch it and tests may fall outside the project's `tsconfig` include. The call clears nothing, so those tests rely on registration order rather than a clean registry.

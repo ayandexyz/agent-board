@@ -239,6 +239,27 @@ When viewing dashboard with active sessions ([app.go:474-502](internal/tui/app.g
 
 ---
 
+## Agent Activity Tracking (in progress)
+
+Spawned agents report their own state over HTTP rather than the board guessing from the screen. Only the FreeCode half is implemented; the receiver that consumes these reports is Phase 2 of the plan.
+
+Every agent pane is launched with its session identity exported via `tmux new-window -e`:
+
+| Variable | Meaning |
+|---|---|
+| `AGENTBOARD_SESSION_ID` | The session this pane belongs to |
+| `AGENTBOARD_LAUNCH_ID` | Per-spawn id; lets the board drop hooks from an earlier launch of the same session |
+| `AGENTBOARD_HOOK_URL` | Base URL of the board's local hook receiver |
+| `FREECODE_HOOK_URL` | FreeCode only: `<base>/hooks/<sessionID>` |
+
+Nothing is exported unless `Service.SetHookBaseURL` was called, so an agent is never told to reach a receiver that is not running.
+
+FreeCode support lives in the FreeCode repo at `apps/core/src/hooks/builtin/board-webhook.ts`, registered from `initHooks`. It posts Claude Code shaped hook payloads (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`) so the board needs no FreeCode-specific mapper, and it answers permission requests remotely: a reply of `{"hookSpecificOutput":{"decision":"allow"}}` resolves the agent's pending prompt as a one-shot grant, `deny` rejects it, and no decision leaves the choice to the pane picker.
+
+See `docs/superpowers/specs/2026-09-08-agent-activity-tracking-design.md` and `docs/superpowers/plans/2026-09-08-agent-activity-tracking.md`.
+
+---
+
 ## Git Worktree Isolation & Merge Flow
 
 Every ticket gets an isolated git worktree when an agent starts on it, so parallel agents never collide on the filesystem.
@@ -343,6 +364,10 @@ Backlog -> In Progress            -> Review              -> Done
 | `AGENTBOARD_GIT_WORKTREE_ROOT` | `~/.agentboard/worktrees` | Root dir for ticket worktrees |
 | `AGENTBOARD_GIT_BRANCH_PREFIX` | `agent/` | Branch prefix for generated branches |
 | `AGENTBOARD_GIT_BASE_BRANCH` | auto | Base branch for worktrees and merges |
+| `AGENTBOARD_SESSION_ID` | set by board | Exported into each agent pane; the session the pane belongs to |
+| `AGENTBOARD_LAUNCH_ID` | set by board | Exported into each agent pane; per-spawn generation id |
+| `AGENTBOARD_HOOK_URL` | set by board | Exported into each agent pane; base URL of the hook receiver |
+| `FREECODE_HOOK_URL` | set by board | Exported for freecode agents; per-session hook endpoint |
 | `AGENTBOARD_NPM_PATH` | `npm` | Path to npm binary (for MCP servers) |
 | `AGENTBOARD_NODE_PATH` | `node` | Path to node binary (for MCP servers) |
 | `NO_COLOR` | — | Disable colored output (respects standard env var) |
