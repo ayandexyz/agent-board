@@ -28,6 +28,7 @@ type Service struct {
 	activeSessions map[string]*AgentSession
 	completionCh   chan RunCompletion
 	hookBaseURL    string
+	onLaunch       func(sessionID, launchID string)
 }
 
 // AgentSession tracks an active agent session
@@ -65,6 +66,12 @@ func (s *Service) SetHookBaseURL(url string) {
 	s.hookBaseURL = strings.TrimRight(url, "/")
 }
 
+// SetLaunchNotifier is told the launch id of every spawn that gets hook
+// environment, so the receiver can drop reports from an earlier launch.
+func (s *Service) SetLaunchNotifier(f func(sessionID, launchID string)) {
+	s.onLaunch = f
+}
+
 // launchEnv is the identity a spawned agent reports back with. The launch id
 // lets the board drop hooks from an earlier launch of the same session, whose
 // late events would otherwise corrupt the current one's state.
@@ -75,6 +82,9 @@ func (s *Service) launchEnv(agent, sessionID, launchID string) []string {
 	}
 	if s.hookBaseURL == "" {
 		return env
+	}
+	if s.onLaunch != nil {
+		s.onLaunch(sessionID, launchID)
 	}
 	env = append(env, "AGENTBOARD_HOOK_URL="+s.hookBaseURL)
 	// FreeCode reads its own variable and posts Claude-shaped hook payloads to
@@ -381,6 +391,16 @@ func (s *Service) GetActiveSessions() []*AgentSession {
 }
 
 // GetActiveSessionByTicket returns the active session for a ticket
+// TicketForSession returns the ticket a live session belongs to, or "".
+func (s *Service) TicketForSession(sessionID string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if sess, ok := s.activeSessions[sessionID]; ok {
+		return sess.TicketID
+	}
+	return ""
+}
+
 func (s *Service) GetActiveSessionByTicket(ticketID string) (*AgentSession, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()

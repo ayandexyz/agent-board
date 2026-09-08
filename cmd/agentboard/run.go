@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/ayan-de/agent-board/internal/activity"
 	"github.com/ayan-de/agent-board/internal/config"
 	"github.com/ayan-de/agent-board/internal/git"
 	"github.com/ayan-de/agent-board/internal/llm"
@@ -78,6 +79,16 @@ func runTUI() int {
 	orch := orchestrator.NewService(s, llmClient, runner, ctxCarry)
 	if agentRunner != nil {
 		orch.SetAgentRunner(agentRunner)
+	}
+
+	recv := activity.New()
+	recv.Label = orch.TicketForSession
+	if base, err := recv.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: activity receiver unavailable: %v\n", err)
+	} else {
+		defer recv.Close()
+		orch.SetHookBaseURL(base)
+		orch.SetLaunchNotifier(recv.Launch)
 	}
 
 	g := git.New(git.ExecRunner())

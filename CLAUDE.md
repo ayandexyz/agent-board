@@ -241,7 +241,11 @@ When viewing dashboard with active sessions ([app.go:474-502](internal/tui/app.g
 
 ## Agent Activity Tracking (in progress)
 
-Spawned agents report their own state over HTTP rather than the board guessing from the screen. Only the FreeCode half is implemented; the receiver that consumes these reports is Phase 2 of the plan.
+Spawned agents report their own state over HTTP rather than the board guessing from the screen.
+
+`internal/activity` is the receiver: a loopback `net/http` server on `127.0.0.1:0`, started in `runTUI` and handed to the orchestrator via `SetHookBaseURL`. It accepts `POST /hooks/{sessionID}` carrying Claude-Code-shaped hook JSON, maps it to a state (`active`, `idle`, `waiting_input`, `blocked`, `exited`), and fires one `notify-send` on entry into the needs-input family. `X-Agentboard-Launch` is checked against the launch id recorded at spawn, so a relaunched session's late hooks are dropped.
+
+Not built yet: the store migration, the event hub, holding `PermissionRequest` open for a remote decision (the handler answers `{}` immediately and the pane picker takes over), `tool_use_id` matching in the tool-flight rule, the TUI glyph/waiting overlay, and the capture-pane reconciler.
 
 Every agent pane is launched with its session identity exported via `tmux new-window -e`:
 
