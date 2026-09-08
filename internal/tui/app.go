@@ -759,7 +759,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	if a.view == viewTicket && a.ticketView.mode == ticketEditMode {
+	if a.view == viewTicket && (a.ticketView.mode == ticketEditMode || a.ticketView.mode == ticketAdHocPromptMode) {
 		var cmd tea.Cmd
 		a.ticketView, cmd = a.ticketView.Update(msg)
 		return a, cmd

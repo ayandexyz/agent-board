@@ -47,15 +47,32 @@ type ticketField struct {
 }
 
 type TicketViewStyles struct {
-	Border      lipgloss.Style
-	Title       lipgloss.Style
-	Label       lipgloss.Style
-	Value       lipgloss.Style
-	SelectedRow lipgloss.Style
-	Cursor      lipgloss.Style
-	EditBox     lipgloss.Style
-	Footer      lipgloss.Style
-	Empty       lipgloss.Style
+	Border       lipgloss.Style
+	Title        lipgloss.Style
+	Label        lipgloss.Style
+	LabelActive  lipgloss.Style
+	Value        lipgloss.Style
+	SelectedRow  lipgloss.Style
+	Cursor       lipgloss.Style
+	Caret        lipgloss.Style
+	CaretCell    lipgloss.Style
+	EditBox      lipgloss.Style
+	Footer       lipgloss.Style
+	Empty        lipgloss.Style
+	Rule         lipgloss.Style
+	Badge        lipgloss.Style
+	Panel        lipgloss.Style
+	PanelTitle   lipgloss.Style
+	OptionActive lipgloss.Style
+
+	OnAccent     lipgloss.Color
+	MutedColor   lipgloss.Color
+	AccentColor  lipgloss.Color
+	SuccessColor lipgloss.Color
+	WarningColor lipgloss.Color
+
+	StatusColors   map[string]lipgloss.Color
+	PriorityColors map[string]lipgloss.Color
 }
 
 type TicketViewModel struct {
@@ -69,6 +86,7 @@ type TicketViewModel struct {
 	cursor      int
 	mode        ticketViewModeType
 	editBuffer  string
+	editCursor  int
 	agents      []config.DetectedAgent
 	agentCursor int
 
@@ -114,6 +132,11 @@ func DefaultTicketViewStyles() TicketViewStyles {
 			Foreground(lipgloss.Color("15")),
 		Cursor: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("69")),
+		Caret: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("213")),
+		CaretCell: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("235")).
+			Background(lipgloss.Color("213")),
 		EditBox: lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder()).
 			BorderForeground(lipgloss.Color("213")),
@@ -121,6 +144,45 @@ func DefaultTicketViewStyles() TicketViewStyles {
 			Foreground(lipgloss.Color("240")),
 		Empty: lipgloss.NewStyle().
 			Foreground(lipgloss.Color("240")),
+		LabelActive: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("235")).
+			Background(lipgloss.Color("69")).
+			Padding(0, 1),
+		Rule: lipgloss.NewStyle().
+			Foreground(lipgloss.Color("238")),
+		Badge: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("235")).
+			Background(lipgloss.Color("69")).
+			Padding(0, 1),
+		Panel: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(lipgloss.Color("213")).
+			Padding(0, 1),
+		PanelTitle: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("213")),
+		OptionActive: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(lipgloss.Color("69")),
+		OnAccent:     lipgloss.Color("235"),
+		MutedColor:   lipgloss.Color("240"),
+		AccentColor:  lipgloss.Color("213"),
+		SuccessColor: lipgloss.Color("42"),
+		WarningColor: lipgloss.Color("208"),
+		StatusColors: map[string]lipgloss.Color{
+			"backlog":     lipgloss.Color("240"),
+			"in_progress": lipgloss.Color("208"),
+			"review":      lipgloss.Color("213"),
+			"done":        lipgloss.Color("42"),
+		},
+		PriorityColors: map[string]lipgloss.Color{
+			"low":      lipgloss.Color("240"),
+			"medium":   lipgloss.Color("69"),
+			"high":     lipgloss.Color("208"),
+			"critical": lipgloss.Color("196"),
+		},
 	}
 }
 
@@ -143,6 +205,11 @@ func NewTicketViewStyles(t *theme.Theme) TicketViewStyles {
 			Foreground(t.Text),
 		Cursor: lipgloss.NewStyle().
 			Foreground(t.Primary),
+		Caret: lipgloss.NewStyle().
+			Foreground(t.Accent),
+		CaretCell: lipgloss.NewStyle().
+			Foreground(t.Background).
+			Background(t.Accent),
 		EditBox: lipgloss.NewStyle().
 			Border(lipgloss.NormalBorder()).
 			BorderForeground(t.Accent),
@@ -150,6 +217,45 @@ func NewTicketViewStyles(t *theme.Theme) TicketViewStyles {
 			Foreground(t.TextMuted),
 		Empty: lipgloss.NewStyle().
 			Foreground(t.TextMuted),
+		LabelActive: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(t.Background).
+			Background(t.Primary).
+			Padding(0, 1),
+		Rule: lipgloss.NewStyle().
+			Foreground(t.Border),
+		Badge: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(t.Background).
+			Background(t.Primary).
+			Padding(0, 1),
+		Panel: lipgloss.NewStyle().
+			Border(lipgloss.RoundedBorder()).
+			BorderForeground(t.Accent).
+			Padding(0, 1),
+		PanelTitle: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(t.Accent),
+		OptionActive: lipgloss.NewStyle().
+			Bold(true).
+			Foreground(t.Primary),
+		OnAccent:     t.Background,
+		MutedColor:   t.TextMuted,
+		AccentColor:  t.Accent,
+		SuccessColor: t.Success,
+		WarningColor: t.Warning,
+		StatusColors: map[string]lipgloss.Color{
+			"backlog":     t.TextMuted,
+			"in_progress": t.Warning,
+			"review":      t.Accent,
+			"done":        t.Success,
+		},
+		PriorityColors: map[string]lipgloss.Color{
+			"low":      t.TextMuted,
+			"medium":   t.Info,
+			"high":     t.Warning,
+			"critical": t.Error,
+		},
 	}
 }
 
@@ -258,17 +364,19 @@ func (m TicketViewModel) branchDisplay() string {
 	if m.ticket == nil {
 		return ""
 	}
-	if !m.ticket.UsesWorktree() {
-		if m.currentBranch != "" {
-			return fmt.Sprintf("current branch (%s)", m.currentBranch)
-		}
-		return "current branch"
-	}
+	mode := "worktree"
 	branch := m.ticket.Branch
-	if branch == "" {
+	if !m.ticket.UsesWorktree() {
+		mode = "current"
+		branch = m.currentBranch
+	} else if branch == "" {
 		branch = m.defaultBranchName()
 	}
-	return fmt.Sprintf("worktree branch (%s)", branch)
+	if branch == "" {
+		return m.styles.Empty.Render(mode + " branch")
+	}
+	return m.styles.Empty.Render(mode+" · ") +
+		lipgloss.NewStyle().Foreground(m.styles.AccentColor).Render(branch)
 }
 
 func (m TicketViewModel) helpFooter() string {
@@ -373,6 +481,7 @@ func (m TicketViewModel) handleViewKey(msg tea.KeyMsg) (TicketViewModel, tea.Cmd
 			} else {
 				m.editBuffer = m.fields[m.cursor].value(m.ticket)
 			}
+			m.editCursor = len([]rune(m.editBuffer))
 			m.mode = ticketEditMode
 		}
 	case keybinding.ActionAssignAgent:
@@ -489,6 +598,97 @@ func (m TicketViewModel) handleViewKey(msg tea.KeyMsg) (TicketViewModel, tea.Cmd
 	return m, nil
 }
 
+// textEdit is a caret position inside a rune buffer. Both the field editor and
+// the ad-hoc prompt drive their key handling through it.
+type textEdit struct {
+	value string
+	pos   int
+}
+
+func newTextEdit(value string, pos int) textEdit {
+	e := textEdit{value: value}
+	return e.withCursor(pos)
+}
+
+func (e textEdit) runes() []rune { return []rune(e.value) }
+
+func (e textEdit) withCursor(pos int) textEdit {
+	n := len(e.runes())
+	if pos < 0 {
+		pos = 0
+	}
+	if pos > n {
+		pos = n
+	}
+	e.pos = pos
+	return e
+}
+
+func (e textEdit) insert(s string) textEdit {
+	r := e.runes()
+	e.value = string(r[:e.pos]) + s + string(r[e.pos:])
+	e.pos += len([]rune(s))
+	return e
+}
+
+func (e textEdit) deleteRange(from, to int) textEdit {
+	r := e.runes()
+	if from < 0 {
+		from = 0
+	}
+	if to > len(r) {
+		to = len(r)
+	}
+	if from >= to {
+		return e
+	}
+	e.value = string(r[:from]) + string(r[to:])
+	e.pos = from
+	return e
+}
+
+func (e textEdit) wordStart() int {
+	r := e.runes()
+	i := e.pos
+	for i > 0 && r[i-1] == ' ' {
+		i--
+	}
+	for i > 0 && r[i-1] != ' ' {
+		i--
+	}
+	return i
+}
+
+// apply maps a key to an edit. Keys that end editing (enter, esc) are left to
+// the caller, which is why they are reported as unhandled.
+func (e textEdit) apply(msg tea.KeyMsg) (textEdit, bool) {
+	switch msg.Type {
+	case tea.KeyLeft, tea.KeyCtrlB:
+		return e.withCursor(e.pos - 1), true
+	case tea.KeyRight, tea.KeyCtrlF:
+		return e.withCursor(e.pos + 1), true
+	case tea.KeyHome, tea.KeyCtrlA:
+		return e.withCursor(0), true
+	case tea.KeyEnd, tea.KeyCtrlE:
+		return e.withCursor(len(e.runes())), true
+	case tea.KeyBackspace:
+		return e.deleteRange(e.pos-1, e.pos), true
+	case tea.KeyDelete, tea.KeyCtrlD:
+		return e.deleteRange(e.pos, e.pos+1), true
+	case tea.KeyCtrlW:
+		return e.deleteRange(e.wordStart(), e.pos), true
+	case tea.KeyCtrlU:
+		return e.deleteRange(0, e.pos), true
+	case tea.KeyCtrlK:
+		return e.deleteRange(e.pos, len(e.runes())), true
+	case tea.KeySpace:
+		return e.insert(" "), true
+	case tea.KeyRunes:
+		return e.insert(string(msg.Runes)), true
+	}
+	return e, false
+}
+
 func (m TicketViewModel) handleEditKey(msg tea.KeyMsg) (TicketViewModel, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEnter:
@@ -501,24 +701,18 @@ func (m TicketViewModel) handleEditKey(msg tea.KeyMsg) (TicketViewModel, tea.Cmd
 		}
 		m.mode = ticketViewMode
 		m.editBuffer = ""
+		m.editCursor = 0
 		return m, nil
 	case tea.KeyEscape:
 		m.mode = ticketViewMode
 		m.editBuffer = ""
-		return m, nil
-	case tea.KeyBackspace:
-		if len(m.editBuffer) > 0 {
-			runes := []rune(m.editBuffer)
-			m.editBuffer = string(runes[:len(runes)-1])
-		}
-		return m, nil
-	case tea.KeySpace:
-		m.editBuffer += " "
+		m.editCursor = 0
 		return m, nil
 	}
 
-	if msg.Type == tea.KeyRunes {
-		m.editBuffer += string(msg.Runes)
+	if e, handled := newTextEdit(m.editBuffer, m.editCursor).apply(msg); handled {
+		m.editBuffer = e.value
+		m.editCursor = e.pos
 	}
 
 	return m, nil
@@ -547,6 +741,7 @@ func (m TicketViewModel) handleBranchModeSelectKey(msg tea.KeyMsg) (TicketViewMo
 		if m.editBuffer == "" {
 			m.editBuffer = m.defaultBranchName()
 		}
+		m.editCursor = len([]rune(m.editBuffer))
 		m.mode = ticketEditMode
 		return m, nil
 	case tea.KeyUp:
@@ -740,6 +935,7 @@ func (m TicketViewModel) handleAdHocPromptKey(msg tea.KeyMsg) (TicketViewModel, 
 	case tea.KeyEscape:
 		m.mode = ticketViewMode
 		m.adhocPrompt = ""
+		m.adhocPromptCursor = 0
 		return m, nil
 	case tea.KeyEnter:
 		if m.adhocPrompt != "" {
@@ -747,21 +943,17 @@ func (m TicketViewModel) handleAdHocPromptKey(msg tea.KeyMsg) (TicketViewModel, 
 			prompt := m.adhocPrompt
 			m.mode = ticketViewMode
 			m.adhocPrompt = ""
+			m.adhocPromptCursor = 0
 			return m, func() tea.Msg {
 				return adhocRunStartedMsg{agent: agent, prompt: prompt}
 			}
 		}
 		return m, nil
-	case tea.KeyBackspace:
-		if len(m.adhocPrompt) > 0 {
-			runes := []rune(m.adhocPrompt)
-			m.adhocPrompt = string(runes[:len(runes)-1])
-		}
-		return m, nil
 	}
 
-	if msg.Type == tea.KeyRunes {
-		m.adhocPrompt += string(msg.Runes)
+	if e, handled := newTextEdit(m.adhocPrompt, m.adhocPromptCursor).apply(msg); handled {
+		m.adhocPrompt = e.value
+		m.adhocPromptCursor = e.pos
 	}
 
 	return m, nil
@@ -799,6 +991,7 @@ func (m TicketViewModel) SetTicket(t *store.Ticket) TicketViewModel {
 	m.cursor = 0
 	m.mode = ticketViewMode
 	m.editBuffer = ""
+	m.editCursor = 0
 	m.activeProposal = nil
 	return m
 }
@@ -812,6 +1005,209 @@ func (m TicketViewModel) SetProposal(p *store.Proposal) TicketViewModel {
 func (m TicketViewModel) SetLoading(loading bool) TicketViewModel {
 	m.loading = loading
 	return m
+}
+
+func truncateText(s string, width int) string {
+	if width <= 0 {
+		return ""
+	}
+	r := []rune(s)
+	if len(r) <= width {
+		return s
+	}
+	if width <= 1 {
+		return string(r[:width])
+	}
+	return string(r[:width-1]) + "…"
+}
+
+func (m TicketViewModel) statusColor(status string) lipgloss.Color {
+	if c, ok := m.styles.StatusColors[status]; ok {
+		return c
+	}
+	return m.styles.MutedColor
+}
+
+func (m TicketViewModel) priorityColor(priority string) lipgloss.Color {
+	if c, ok := m.styles.PriorityColors[priority]; ok {
+		return c
+	}
+	return m.styles.MutedColor
+}
+
+func (m TicketViewModel) pill(text string, bg lipgloss.Color) string {
+	return lipgloss.NewStyle().
+		Foreground(m.styles.OnAccent).
+		Background(bg).
+		Bold(true).
+		Padding(0, 1).
+		Render(text)
+}
+
+func (m TicketViewModel) rule(width int, glyph string) string {
+	if width < 1 {
+		width = 1
+	}
+	return m.styles.Rule.Render(strings.Repeat(glyph, width))
+}
+
+func (m TicketViewModel) header(innerWidth int) string {
+	badge := m.styles.Badge.Render(m.ticket.ID)
+	status := m.pill(m.ticket.Status, m.statusColor(m.ticket.Status))
+
+	room := innerWidth - lipgloss.Width(badge) - lipgloss.Width(status) - 4
+	title := m.styles.Title.Render(truncateText(m.ticket.Title, room))
+
+	left := lipgloss.JoinHorizontal(lipgloss.Top, badge, "  ", title)
+	gap := innerWidth - lipgloss.Width(left) - lipgloss.Width(status)
+	if gap < 1 {
+		gap = 1
+	}
+	return lipgloss.JoinHorizontal(lipgloss.Top, left, strings.Repeat(" ", gap), status)
+}
+
+func (m TicketViewModel) chips(items []string) string {
+	if len(items) == 0 {
+		return ""
+	}
+	out := make([]string, 0, len(items))
+	for _, it := range items {
+		out = append(out, m.styles.Value.Render(it))
+	}
+	return strings.Join(out, m.styles.Rule.Render(" · "))
+}
+
+func (m TicketViewModel) fieldValue(f ticketField, width int, selected bool) string {
+	raw := f.value(m.ticket)
+
+	switch f.label {
+	case "Status":
+		return lipgloss.NewStyle().Foreground(m.statusColor(raw)).Bold(true).Render("● " + raw)
+	case "Priority":
+		if raw == "" {
+			break
+		}
+		return lipgloss.NewStyle().Foreground(m.priorityColor(raw)).Bold(true).Render(raw)
+	case "Agent":
+		if raw == "" {
+			return m.styles.Empty.Render("unassigned")
+		}
+		return lipgloss.NewStyle().Foreground(m.styles.AccentColor).Render(raw)
+	case "Branch":
+		return m.branchDisplay()
+	case "Tags":
+		return m.chips(m.ticket.Tags)
+	case "Depends On":
+		return m.chips(m.ticket.DependsOn)
+	case "ID", "Created", "Updated", "Resume":
+		if raw != "" {
+			return m.styles.Empty.Render(raw)
+		}
+	}
+
+	if raw == "" {
+		return m.styles.Empty.Render("—")
+	}
+
+	style := m.styles.Value.Copy().Width(width)
+	if selected {
+		style = style.Bold(true)
+	}
+	return style.Render(raw)
+}
+
+func (m TicketViewModel) fieldRow(i int, f ticketField, innerWidth int) string {
+	selected := i == m.cursor
+	const labelWidth = 12
+
+	valWidth := innerWidth - labelWidth - 4
+	if valWidth < 10 {
+		valWidth = 10
+	}
+
+	var prefix, label string
+	if selected {
+		prefix = m.styles.Cursor.Render("▸ ")
+		label = m.styles.LabelActive.Render(fmt.Sprintf("%-*s", labelWidth-2, f.label))
+	} else {
+		prefix = "  "
+		label = m.styles.Label.Render(fmt.Sprintf("%-*s", labelWidth, f.label))
+	}
+
+	value := m.fieldValue(f, valWidth, selected)
+
+	return lipgloss.JoinHorizontal(lipgloss.Top, prefix, label, " ", value)
+}
+
+func (m TicketViewModel) inputLine(buffer string, pos int, innerWidth int) string {
+	width := innerWidth - 4
+	if width < 10 {
+		width = 10
+	}
+
+	r := []rune(buffer)
+	if pos > len(r) {
+		pos = len(r)
+	}
+	if pos < 0 {
+		pos = 0
+	}
+
+	avail := width - 1
+	// Keep a little of the text after the caret on screen when scrolled.
+	margin := avail / 3
+	if margin > 8 {
+		margin = 8
+	}
+	start := pos - avail + margin
+	if maxStart := len(r) - avail; start > maxStart {
+		start = maxStart
+	}
+	if start < 0 {
+		start = 0
+	}
+	end := start + avail
+	if end > len(r) {
+		end = len(r)
+	}
+
+	seg := r[start:end]
+	caret := pos - start
+	under := " "
+	after := ""
+	if caret < len(seg) {
+		under = string(seg[caret])
+		after = string(seg[caret+1:])
+	}
+
+	text := m.styles.Value.Copy().Bold(true)
+	line := text.Render(string(seg[:caret])) +
+		m.styles.CaretCell.Render(under) +
+		text.Render(after)
+	if start > 0 {
+		line = m.styles.Empty.Render("…") + line
+	}
+
+	return lipgloss.JoinVertical(lipgloss.Left, line, m.rule(width, "─"))
+}
+
+func (m TicketViewModel) panel(title string, body []string, innerWidth int) string {
+	width := innerWidth - 2
+	if width < 16 {
+		width = 16
+	}
+	content := m.styles.PanelTitle.Render(title)
+	if len(body) > 0 {
+		content += "\n" + strings.Join(body, "\n")
+	}
+	return m.styles.Panel.Copy().Width(width).Render(content)
+}
+
+func (m TicketViewModel) option(label string, selected bool) string {
+	if selected {
+		return m.styles.Cursor.Render("▸ ") + m.styles.OptionActive.Render(label)
+	}
+	return "  " + m.styles.Value.Render(label)
 }
 
 func (m TicketViewModel) View() string {
@@ -830,213 +1226,146 @@ func (m TicketViewModel) View() string {
 
 	var b strings.Builder
 
-	titleLine := m.styles.Title.Render(fmt.Sprintf("%s  %s", m.ticket.ID, m.ticket.Title))
-	b.WriteString(titleLine)
+	b.WriteString(m.header(innerWidth))
 	b.WriteString("\n")
-	b.WriteString(strings.Repeat("─", min(innerWidth, 60)))
-	b.WriteString("\n\n")
+	b.WriteString(m.rule(innerWidth, "━"))
+	b.WriteString("\n")
 
+	groupEnds := map[string]bool{"Prompt": true, "Branch": true}
 	for i, f := range m.fields {
-		val := f.value(m.ticket)
-		if f.label == "Branch" {
-			val = m.branchDisplay()
-		}
-		if val == "" {
-			val = "—"
-		}
-
-		prefix := "  "
-		if i == m.cursor {
-			prefix = "▸ "
-		}
-
-		valWidth := innerWidth - 15
-		if valWidth < 10 {
-			valWidth = 10
-		}
-
-		labelStr := fmt.Sprintf("%-12s", f.label)
-		labelStyle := m.styles.Label
-		prefixStyle := lipgloss.NewStyle()
-
-		if i == m.cursor {
-			labelStyle = m.styles.Title
-			prefixStyle = m.styles.Cursor
-		}
-
-		renderedPrefix := prefixStyle.Render(prefix)
-		renderedLabel := labelStyle.Render(labelStr)
-		renderedVal := m.styles.Value.Copy().Width(valWidth).Render(val)
-
-		row := lipgloss.JoinHorizontal(lipgloss.Top, renderedPrefix, renderedLabel, " ", renderedVal)
-
-		b.WriteString(row)
+		b.WriteString(m.fieldRow(i, f, innerWidth))
 		b.WriteString("\n")
-	}
-
-	if m.mode == ticketEditMode {
-		b.WriteString("\n")
-		editLabel := fmt.Sprintf("Edit %s:", m.fields[m.cursor].label)
-		b.WriteString(m.styles.Label.Render(editLabel))
-		b.WriteString("\n")
-		editLine := m.editBuffer + "│"
-		b.WriteString(m.styles.EditBox.Width(innerWidth - 4).Render(editLine))
-		b.WriteString("\n")
-	}
-
-	if m.mode == ticketBranchModeSelectMode {
-		b.WriteString("\n")
-		b.WriteString(m.styles.Label.Render("Work on:"))
-		b.WriteString("\n")
-
-		for i, mode := range branchModeOptions {
-			label := branchModeLabel(mode)
-			if mode == store.BranchModeCurrent && m.currentBranch != "" {
-				label += " (" + m.currentBranch + ")"
-			}
-			if mode == store.BranchModeWorktree {
-				label += " (isolated worktree)"
-			}
-
-			prefix := "  "
-			pStyle := lipgloss.NewStyle()
-			iStyle := m.styles.Value
-			if i == m.branchModeCursor {
-				prefix = "▸ "
-				pStyle = m.styles.Cursor
-				iStyle = m.styles.Title
-			}
-
-			b.WriteString(pStyle.Render(prefix) + iStyle.Render(label))
+		if groupEnds[f.label] {
+			b.WriteString(m.rule(innerWidth, "┈"))
 			b.WriteString("\n")
 		}
 	}
 
-	if m.mode == ticketAgentSelectMode {
+	if m.loading || m.activeProposal != nil || m.ticket.Status == "in_progress" {
+		var body []string
+		switch {
+		case m.loading:
+			body = append(body, m.pill("generating", m.styles.WarningColor)+
+				m.styles.Empty.Render("  please wait"))
+		case m.activeProposal != nil:
+			color := m.styles.MutedColor
+			switch m.activeProposal.Status {
+			case "pending":
+				color = m.styles.AccentColor
+			case "approved":
+				color = m.styles.SuccessColor
+			}
+			body = append(body, m.pill(m.activeProposal.Status, color), "")
+
+			preview := m.activeProposal.Prompt
+			if len(preview) > 300 {
+				preview = preview[:300] + "\n\n" + m.styles.Empty.Render("[…] press v for the full proposal")
+			}
+			body = append(body, m.styles.Value.Copy().Width(innerWidth-8).Render(preview))
+		default:
+			body = append(body, m.styles.Empty.Render("No active proposal for this ticket."))
+		}
 		b.WriteString("\n")
-		b.WriteString(m.styles.Label.Render("Select Agent:"))
+		b.WriteString(m.panel("Active Proposal", body, innerWidth))
+		b.WriteString("\n")
+	}
+
+	switch m.mode {
+	case ticketEditMode:
+		b.WriteString("\n")
+		b.WriteString(m.panel("Edit "+m.fields[m.cursor].label, []string{
+			m.inputLine(m.editBuffer, m.editCursor, innerWidth),
+		}, innerWidth))
 		b.WriteString("\n")
 
+	case ticketBranchModeSelectMode:
+		body := make([]string, 0, len(branchModeOptions))
+		for i, mode := range branchModeOptions {
+			label := branchModeLabel(mode)
+			hint := "isolated worktree"
+			if mode == store.BranchModeCurrent {
+				hint = "no worktree"
+				if m.currentBranch != "" {
+					hint = m.currentBranch
+				}
+			}
+			line := m.option(label, i == m.branchModeCursor) +
+				m.styles.Empty.Render("  "+hint)
+			body = append(body, line)
+		}
+		b.WriteString("\n")
+		b.WriteString(m.panel("Work on:", body, innerWidth))
+		b.WriteString("\n")
+
+	case ticketAgentSelectMode:
 		items := make([]string, 0, len(m.agents)+1)
 		items = append(items, "None")
 		for _, ag := range m.agents {
 			items = append(items, ag.Name)
 		}
-
+		body := make([]string, 0, len(items))
 		for i, item := range items {
-			prefix := "  "
-			if i == m.agentCursor {
-				prefix = "▸ "
-			}
-
-			pStyle := lipgloss.NewStyle()
-			iStyle := m.styles.Value
-			if i == m.agentCursor {
-				pStyle = m.styles.Cursor
-				iStyle = m.styles.Title
-			}
-
-			row := pStyle.Render(prefix) + iStyle.Render(item)
-			b.WriteString(row)
-			b.WriteString("\n")
+			body = append(body, m.option(item, i == m.agentCursor))
 		}
-	}
-
-	if m.mode == ticketPrioritySelectMode {
 		b.WriteString("\n")
-		b.WriteString(m.styles.Label.Render("Select Priority:"))
+		b.WriteString(m.panel("Select Agent:", body, innerWidth))
 		b.WriteString("\n")
 
+	case ticketPrioritySelectMode:
+		body := make([]string, 0, len(m.priorities))
 		for i, p := range m.priorities {
 			display := p
 			if display == "" {
 				display = "None"
 			}
-			prefix := "  "
-			if i == m.priorityCursor {
-				prefix = "▸ "
-			}
-
-			pStyle := lipgloss.NewStyle()
-			iStyle := m.styles.Value
-			if i == m.priorityCursor {
-				pStyle = m.styles.Cursor
-				iStyle = m.styles.Title
-			}
-
-			row := pStyle.Render(prefix) + iStyle.Render(display)
-			b.WriteString(row)
-			b.WriteString("\n")
+			body = append(body, m.option(display, i == m.priorityCursor))
 		}
-	}
-
-	if m.mode == ticketDependsOnSelectMode {
 		b.WriteString("\n")
-		b.WriteString(m.styles.Label.Render("Select Dependencies (space to toggle):"))
+		b.WriteString(m.panel("Select Priority:", body, innerWidth))
 		b.WriteString("\n")
 
-		shown := 0
+	case ticketDependsOnSelectMode:
+		var body []string
 		for i, t := range m.dependsOnTickets {
-			if m.ticket != nil && t.ID == m.ticket.ID {
+			if t.ID == m.ticket.ID {
 				continue
 			}
-			shown++
-			prefix := "  "
-			if i == m.dependsOnCursor {
-				prefix = "▸ "
-			}
-			selected := ""
+			mark := m.styles.Empty.Render("○")
 			for _, d := range m.dependsOnSelected {
 				if d == t.ID {
-					selected = " ✓"
+					mark = lipgloss.NewStyle().Foreground(m.styles.SuccessColor).Render("●")
 					break
 				}
 			}
-
-			pStyle := lipgloss.NewStyle()
-			iStyle := m.styles.Value
-			if i == m.dependsOnCursor {
-				pStyle = m.styles.Cursor
-				iStyle = m.styles.Title
-			}
-
-			row := pStyle.Render(prefix) + iStyle.Render(t.ID+" - "+t.Title+selected)
-			b.WriteString(row)
-			b.WriteString("\n")
+			label := t.ID + "  " + truncateText(t.Title, innerWidth-20)
+			body = append(body, m.option(mark+" "+label, i == m.dependsOnCursor))
 		}
-		if shown == 0 {
-			b.WriteString(m.styles.Empty.Render("No tickets available"))
-			b.WriteString("\n")
+		if len(body) == 0 {
+			body = []string{m.styles.Empty.Render("No tickets available")}
 		}
-	}
-
-	if m.mode == ticketAdHocPromptMode {
 		b.WriteString("\n")
-		b.WriteString(m.styles.Title.Render(fmt.Sprintf("Run %s with prompt:", m.adhocAgent)))
-		b.WriteString("\n\n")
-		promptLabel := m.styles.Label.Render("Task:")
-		b.WriteString(promptLabel)
+		b.WriteString(m.panel("Select Dependencies (space to toggle):", body, innerWidth))
 		b.WriteString("\n")
-		promptLine := m.adhocPrompt + "│"
-		if len(promptLine) > innerWidth-4 {
-			promptLine = promptLine[:innerWidth-7] + "..."
-		}
-		b.WriteString(m.styles.EditBox.Width(innerWidth - 4).Render(promptLine))
+
+	case ticketAdHocPromptMode:
+		b.WriteString("\n")
+		b.WriteString(m.panel(fmt.Sprintf("Run %s with prompt:", m.adhocAgent), []string{
+			m.inputLine(m.adhocPrompt, m.adhocPromptCursor, innerWidth),
+		}, innerWidth))
 		b.WriteString("\n")
 	}
 
 	var footer string
-	if m.mode == ticketBranchModeSelectMode {
+	switch m.mode {
+	case ticketBranchModeSelectMode, ticketAgentSelectMode, ticketPrioritySelectMode:
 		footer = "↑/k: up │ ↓/j: down │ Enter: select │ Esc: cancel"
-	} else if m.mode == ticketAgentSelectMode {
-		footer = "↑/k: up │ ↓/j: down │ Enter: select │ Esc: cancel"
-	} else if m.mode == ticketPrioritySelectMode {
-		footer = "↑/k: up │ ↓/j: down │ Enter: select │ Esc: cancel"
-	} else if m.mode == ticketDependsOnSelectMode {
+	case ticketDependsOnSelectMode:
 		footer = "↑/k: up │ ↓/j: down │ Space: toggle │ Enter: save │ Esc: cancel"
-	} else if m.mode == ticketAdHocPromptMode {
+	case ticketAdHocPromptMode:
 		footer = "Enter: run agent │ Esc: cancel"
-	} else {
+	case ticketEditMode:
+		footer = "Enter: save │ Esc: cancel"
+	default:
 		footer = m.helpFooter()
 		if m.activeProposal != nil {
 			footer += " │ v: view proposal"
@@ -1046,39 +1375,7 @@ func (m TicketViewModel) View() string {
 		}
 	}
 
-	if m.loading || m.activeProposal != nil || m.ticket.Status == "in_progress" {
-		b.WriteString("\n\n")
-		b.WriteString(m.styles.Title.Render("── Active Proposal ───────────────────────"))
-		b.WriteString("\n")
-
-		if m.loading {
-			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("208")).Render("Status: generating... (please wait)"))
-			b.WriteString("\n")
-		} else if m.activeProposal != nil {
-			statusColor := "240"
-			if m.activeProposal.Status == "pending" {
-				statusColor = "213"
-			} else if m.activeProposal.Status == "approved" {
-				statusColor = "42"
-			}
-			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color(statusColor)).Render("Status: " + m.activeProposal.Status))
-			b.WriteString("\n\n")
-			prompt := m.activeProposal.Prompt
-			preview := prompt
-			if len(preview) > 300 {
-				preview = preview[:300] + "\n\n[...] Press v to view full proposal"
-			}
-			b.WriteString(m.styles.Value.Width(innerWidth).Render(preview))
-		} else { // m.ticket.Status == "in_progress"
-			b.WriteString(lipgloss.NewStyle().Foreground(lipgloss.Color("240")).Render("No active proposal found for this ticket."))
-			b.WriteString("\n")
-		}
-	}
-
-	content := b.String()
-	m.viewport.SetContent(content)
-
-	h := m.height - 6
+	h := m.height - 7
 	if h < 0 {
 		h = 0
 	}
@@ -1088,10 +1385,16 @@ func (m TicketViewModel) View() string {
 	if m.viewport.Height == 0 {
 		m.viewport.Height = h
 	}
+
+	m.viewport.SetContent(b.String())
 	if m.mode != ticketViewMode {
-		m.viewport.Height = strings.Count(content, "\n") + 1
+		m.viewport.GotoBottom()
 	}
-	footerRendered := m.styles.Footer.Render(footer)
+
+	footerRendered := lipgloss.JoinVertical(lipgloss.Left,
+		m.rule(innerWidth, "─"),
+		m.styles.Footer.Render(truncateText(footer, innerWidth)),
+	)
 	finalView := lipgloss.JoinVertical(lipgloss.Left, m.viewport.View(), footerRendered)
 	return m.styles.Border.Render(finalView)
 }
