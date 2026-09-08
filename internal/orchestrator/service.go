@@ -119,6 +119,9 @@ func (s *Service) prepareWorkDir(ctx context.Context, ticketID, sessionID string
 	if err != nil {
 		return "", err
 	}
+	if !ticket.UsesWorktree() {
+		return "", nil
+	}
 	info, err := s.worktrees.Ensure(ctx, ticket)
 	if err != nil {
 		return "", fmt.Errorf("orchestrator.prepareWorkDir: %w", err)
