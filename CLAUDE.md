@@ -245,7 +245,7 @@ Spawned agents report their own state over HTTP rather than the board guessing f
 
 `internal/activity` is the receiver: a loopback `net/http` server on `127.0.0.1:0`, started in `runTUI` and handed to the orchestrator via `SetHookBaseURL`. It accepts `POST /hooks/{sessionID}` carrying Claude-Code-shaped hook JSON, maps it to a state (`active`, `idle`, `waiting_input`, `blocked`, `exited`), and fires one `notify-send` on entry into the needs-input family. `X-Agentboard-Launch` is checked against the launch id recorded at spawn, so a relaunched session's late hooks are dropped.
 
-Not built yet: the store migration, the event hub, holding `PermissionRequest` open for a remote decision (the handler answers `{}` immediately and the pane picker takes over), `tool_use_id` matching in the tool-flight rule, the TUI glyph/waiting overlay, and the capture-pane reconciler.
+Not built yet: the store migration, the event hub, holding `PermissionRequest` open for a remote decision (the handler answers `{}` immediately and the pane picker takes over), the tool-flight rule beyond "any PostToolUse clears the block", the TUI glyph/waiting overlay, and the capture-pane reconciler.
 
 Every agent pane is launched with its session identity exported via `tmux new-window -e`:
 
@@ -255,6 +255,25 @@ Every agent pane is launched with its session identity exported via `tmux new-wi
 | `AGENTBOARD_LAUNCH_ID` | Per-spawn id; lets the board drop hooks from an earlier launch of the same session |
 | `AGENTBOARD_HOOK_URL` | Base URL of the board's local hook receiver |
 | `FREECODE_HOOK_URL` | FreeCode only: `<base>/hooks/<sessionID>` |
+
+Claude Code takes no environment variable of its own. It is launched as
+`claude --settings '<inline json>'`, built by `activity.ClaudeSettingsJSON`,
+registering an `http` hook at `<base>/hooks/<sessionID>` for `SessionStart`,
+`UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PermissionRequest`,
+`Notification`, `Stop` and `SessionEnd`. The launch id rides along as the
+`X-Agentboard-Launch` header, interpolated from `$AGENTBOARD_LAUNCH_ID` in the
+pane — which Claude Code only does because `allowedEnvVars` lists it. Inline
+settings keep the ticket worktree clean and cannot outlive the process.
+
+Hooks block the turn, so lifecycle reports time out after 5 s; only
+`PermissionRequest` waits (600 s), since that one is a human decision. Note the
+two agents disagree on the reply shape: Claude Code wants
+`decision: {"behavior": "allow"}` nested, FreeCode wants a bare
+`decision: "allow"`. `PermissionRequest` from Claude Code carries no
+`tool_use_id`.
+
+The extra arguments reach the pane through `RunRequest.Args`, single-quoted into
+the launch line by `agentCommand` in `internal/orchestrator/pty_runner.go`.
 
 Nothing is exported unless `Service.SetHookBaseURL` was called, so an agent is never told to reach a receiver that is not running.
 

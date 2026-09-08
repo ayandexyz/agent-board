@@ -34,6 +34,21 @@ func newWindowArgs(sessionName, windowName, workDir string, env []string) []stri
 	return args
 }
 
+// agentCommand is the line typed into the pane to launch the agent. Arguments
+// are single quoted because one of them is an inline JSON document.
+func agentCommand(bin string, args []string) string {
+	parts := make([]string, 0, len(args)+1)
+	parts = append(parts, bin)
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			parts = append(parts, a)
+			continue
+		}
+		parts = append(parts, "'"+strings.ReplaceAll(a, "'", "")+"'")
+	}
+	return strings.Join(parts, " ")
+}
+
 func (r *tmuxAgentRunner) Start(ctx context.Context, req RunRequest) (RunHandle, error) {
 	sessionName := r.sessionName
 	if sessionName == "" {
@@ -66,7 +81,7 @@ func (r *tmuxAgentRunner) Start(ctx context.Context, req RunRequest) (RunHandle,
 		return RunHandle{}, fmt.Errorf("write prompt file: %w", err)
 	}
 
-	if err := exec.Command("tmux", "send-keys", "-t", paneID, cfg.Bin, "Enter").Run(); err != nil {
+	if err := exec.Command("tmux", "send-keys", "-t", paneID, agentCommand(cfg.Bin, req.Args), "Enter").Run(); err != nil {
 		return RunHandle{}, fmt.Errorf("send bin to pane: %w", err)
 	}
 

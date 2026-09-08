@@ -206,3 +206,56 @@ func TestStartAdHocRunWithoutHookURLExportsNoHookEnv(t *testing.T) {
 		t.Error("AGENTBOARD_SESSION_ID should always be exported")
 	}
 }
+
+func TestStartAdHocRunInstallsClaudeHookSettings(t *testing.T) {
+	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01"}}
+	cr := &capturingRunner{}
+	svc := orchestrator.NewService(fs, nil, nil, nil)
+	svc.SetAgentRunner(cr)
+	svc.SetHookBaseURL("http://127.0.0.1:9999")
+
+	sess, err := svc.StartAdHocRun(context.Background(), "AGT-01", "claude-code", "do it")
+	if err != nil {
+		t.Fatalf("StartAdHocRun() error = %v", err)
+	}
+
+	if len(cr.last.Args) != 2 || cr.last.Args[0] != "--settings" {
+		t.Fatalf("Args = %v, want --settings <json>", cr.last.Args)
+	}
+	want := "http://127.0.0.1:9999/hooks/" + sess.ID
+	if !strings.Contains(cr.last.Args[1], want) {
+		t.Errorf("settings do not point at %s: %s", want, cr.last.Args[1])
+	}
+	if !strings.Contains(cr.last.Args[1], `"PermissionRequest"`) {
+		t.Errorf("settings register no PermissionRequest hook: %s", cr.last.Args[1])
+	}
+}
+
+func TestStartAdHocRunWithoutHookURLPassesNoSettings(t *testing.T) {
+	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01"}}
+	cr := &capturingRunner{}
+	svc := orchestrator.NewService(fs, nil, nil, nil)
+	svc.SetAgentRunner(cr)
+
+	if _, err := svc.StartAdHocRun(context.Background(), "AGT-01", "claude-code", "do it"); err != nil {
+		t.Fatalf("StartAdHocRun() error = %v", err)
+	}
+	if len(cr.last.Args) != 0 {
+		t.Errorf("Args = %v, want none with no receiver running", cr.last.Args)
+	}
+}
+
+func TestStartAdHocRunLeavesOtherAgentsUnflagged(t *testing.T) {
+	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01"}}
+	cr := &capturingRunner{}
+	svc := orchestrator.NewService(fs, nil, nil, nil)
+	svc.SetAgentRunner(cr)
+	svc.SetHookBaseURL("http://127.0.0.1:9999")
+
+	if _, err := svc.StartAdHocRun(context.Background(), "AGT-01", "freecode", "do it"); err != nil {
+		t.Fatalf("StartAdHocRun() error = %v", err)
+	}
+	if len(cr.last.Args) != 0 {
+		t.Errorf("Args = %v, want none for a non-claude agent", cr.last.Args)
+	}
+}

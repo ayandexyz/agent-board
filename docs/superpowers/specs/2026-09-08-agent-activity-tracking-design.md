@@ -38,7 +38,7 @@ Vendor signal sources, ranked by reliability:
 
 | Agent | Signal | Answer |
 |---|---|---|
-| Claude Code | Hooks passed per process with `--settings '<inline json>'`, `http` handler type. Events: `Notification` (permission_prompt, idle_prompt, agent_needs_input), `PermissionRequest`, `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Stop`, `SessionEnd`. Every payload carries `session_id`, `tool_name`, `tool_input`, `tool_use_id`, `transcript_path`. | `PermissionRequest` hook response `{"hookSpecificOutput":{"decision":"allow"|"deny"}}`. Free-text answers via `send-keys`. |
+| Claude Code | Hooks passed per process with `--settings '<inline json>'`, `http` handler type. Events: `Notification` (permission_prompt, idle_prompt, agent_needs_input), `PermissionRequest`, `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Stop`, `SessionEnd`. Every payload carries `session_id`, `transcript_path`, `cwd`; tool events add `tool_name`, `tool_input`, `tool_use_id`. | `PermissionRequest` hook response `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"|"deny"}}}`. Free-text answers via `send-keys`. |
 | OpenCode | One `opencode serve --port N`; each worktree driven with `?directory=`. SSE `GET /event`: `permission.asked`, `question.asked`, `session.status`, `session.idle`. | `POST /session/{id}/permissions/{permId}`, `POST /question/{id}/reply`. |
 | Cursor CLI | `.cursor/hooks.json` in the worktree: `beforeShellExecution`, `beforeMCPExecution`, `stop`. | Hook stdout `{"permission":"allow"|"deny"}`. |
 | Codex | `~/.codex/hooks.json`: `PermissionRequest`, `Stop`, `SessionEnd`. | Hook decision. |
@@ -94,6 +94,19 @@ body: the agent's native hook JSON, unchanged
 The handler maps the native payload to an `ActivitySignal{Event, State, ToolName, ToolUseID, LaunchID}` through a per-agent mapper, then calls `ActivityService.Apply`.
 
 For `PermissionRequest` the handler holds the HTTP response open until the board resolves the request or a timeout elapses. Claude Code waits on the hook, so the reply body is the decision. On timeout the handler returns no decision, which lets the agent fall back to its own prompt in the pane. The user can still answer there.
+
+### Verified against Claude Code 2.1.251
+
+Read off the shipped binary's own hook schemas and confirmed by running `claude` against a logging receiver:
+
+- `--settings` takes an inline JSON string. The http handler is `{"type":"http","url","headers","allowedEnvVars","timeout"}`; `timeout` is seconds and defaults to ten minutes.
+- A header value interpolates `$AGENTBOARD_LAUNCH_ID` from the pane environment **only** when `allowedEnvVars` names it. Unlisted `$VAR` references resolve to the empty string.
+- `PreToolUse`, `PostToolUse`, `PostToolUseFailure` and `PermissionDenied` carry `tool_use_id`. **`PermissionRequest` does not** — it carries `tool_name`, `tool_input`, `permission_suggestions`. The tool-flight rule therefore cannot key the blocked candidate on a `tool_use_id` taken from the dialog; it has only the tool name, which is exactly the ambiguous case the spec already fails closed on.
+- `Notification` carries `message`, `title`, `notification_type`.
+- `SessionEnd` reasons are `clear`, `resume`, `logout`, `prompt_input_exit`, `other`.
+- The permission decision is nested: `decision: {behavior: "allow"|"deny"}`, not a bare string. FreeCode reads a bare `decision: "allow"`, so `Resolve` must write whichever shape the answering agent expects.
+- Hooks run inline and block the turn, so lifecycle reports carry a 5 s timeout and only `PermissionRequest` is allowed to wait on a human.
+- Observed in a `-p` run: `UserPromptSubmit`, `PreToolUse`, `PostToolUse` (same `tool_use_id`), `Stop`, `SessionEnd`. `SessionStart` did not fire in `-p` mode.
 
 ### State transitions (Claude Code mapper)
 
