@@ -25,7 +25,17 @@ const (
 	ticketPrioritySelectMode
 	ticketDependsOnSelectMode
 	ticketAdHocPromptMode
+	ticketBranchModeSelectMode
 )
+
+var branchModeOptions = [2]string{store.BranchModeCurrent, store.BranchModeWorktree}
+
+func branchModeLabel(mode string) string {
+	if mode == store.BranchModeCurrent {
+		return "Current branch"
+	}
+	return "Worktree branch"
+}
 
 var statusCycle = [4]string{"backlog", "in_progress", "review", "done"}
 
@@ -64,6 +74,10 @@ type TicketViewModel struct {
 
 	priorities     []string
 	priorityCursor int
+
+	branchPrefix     string
+	currentBranch    string
+	branchModeCursor int
 
 	dependsOnTickets  []store.Ticket
 	dependsOnCursor   int
@@ -229,6 +243,34 @@ func ticketFields() []ticketField {
 	}
 }
 
+func (m TicketViewModel) defaultBranchName() string {
+	if m.ticket == nil {
+		return ""
+	}
+	prefix := m.branchPrefix
+	if prefix == "" {
+		prefix = "agent/"
+	}
+	return prefix + strings.ToLower(m.ticket.ID)
+}
+
+func (m TicketViewModel) branchDisplay() string {
+	if m.ticket == nil {
+		return ""
+	}
+	if !m.ticket.UsesWorktree() {
+		if m.currentBranch != "" {
+			return fmt.Sprintf("current branch (%s)", m.currentBranch)
+		}
+		return "current branch"
+	}
+	branch := m.ticket.Branch
+	if branch == "" {
+		branch = m.defaultBranchName()
+	}
+	return fmt.Sprintf("worktree branch (%s)", branch)
+}
+
 func (m TicketViewModel) helpFooter() string {
 	km := m.resolver.KeyMap()
 	return km.TicketViewHelp() + " │ Esc: back"
@@ -236,15 +278,24 @@ func (m TicketViewModel) helpFooter() string {
 
 func NewTicketViewModel(s *store.Store, resolver *keybinding.Resolver, t *theme.Theme, agents []config.DetectedAgent) TicketViewModel {
 	return TicketViewModel{
-		store:      s,
-		resolver:   resolver,
-		styles:     NewTicketViewStyles(t),
-		fields:     ticketFields(),
-		mode:       ticketViewMode,
-		agents:     agents,
-		priorities: []string{"", "low", "medium", "high", "critical"},
-		viewport:   viewport.New(0, 0),
+		store:        s,
+		resolver:     resolver,
+		styles:       NewTicketViewStyles(t),
+		fields:       ticketFields(),
+		mode:         ticketViewMode,
+		agents:       agents,
+		priorities:   []string{"", "low", "medium", "high", "critical"},
+		branchPrefix: "agent/",
+		viewport:     viewport.New(0, 0),
 	}
+}
+
+func (m TicketViewModel) SetGitContext(currentBranch, branchPrefix string) TicketViewModel {
+	m.currentBranch = currentBranch
+	if branchPrefix != "" {
+		m.branchPrefix = branchPrefix
+	}
+	return m
 }
 
 func (m TicketViewModel) Init() tea.Cmd {
@@ -288,6 +339,9 @@ func (m TicketViewModel) handleKey(msg tea.KeyMsg) (TicketViewModel, tea.Cmd) {
 	if m.mode == ticketAdHocPromptMode {
 		return m.handleAdHocPromptKey(msg)
 	}
+	if m.mode == ticketBranchModeSelectMode {
+		return m.handleBranchModeSelectKey(msg)
+	}
 	return m.handleViewKey(msg)
 }
 
@@ -305,6 +359,14 @@ func (m TicketViewModel) handleViewKey(msg tea.KeyMsg) (TicketViewModel, tea.Cmd
 			m.cursor--
 		}
 	case keybinding.ActionInteract:
+		if m.ticket != nil && m.cursor < len(m.fields) && m.fields[m.cursor].label == "Branch" {
+			m.mode = ticketBranchModeSelectMode
+			m.branchModeCursor = 1
+			if !m.ticket.UsesWorktree() {
+				m.branchModeCursor = 0
+			}
+			return m, nil
+		}
 		if m.ticket != nil && m.cursor < len(m.fields) && m.fields[m.cursor].editable {
 			if m.fields[m.cursor].label == "Title" {
 				m.editBuffer = ""
@@ -385,9 +447,9 @@ func (m TicketViewModel) handleViewKey(msg tea.KeyMsg) (TicketViewModel, tea.Cmd
 			if m.ticket.Status != "in_progress" {
 				return m, func() tea.Msg {
 					return notificationMsg{
-						title:    "Cannot start run",
-						message:  "Move ticket to In Progress to start the agent working",
-						variant:  NotificationInfo,
+						title:   "Cannot start run",
+						message: "Move ticket to In Progress to start the agent working",
+						variant: NotificationInfo,
 					}
 				}
 			}
@@ -457,6 +519,59 @@ func (m TicketViewModel) handleEditKey(msg tea.KeyMsg) (TicketViewModel, tea.Cmd
 
 	if msg.Type == tea.KeyRunes {
 		m.editBuffer += string(msg.Runes)
+	}
+
+	return m, nil
+}
+
+func (m TicketViewModel) handleBranchModeSelectKey(msg tea.KeyMsg) (TicketViewModel, tea.Cmd) {
+	switch msg.Type {
+	case tea.KeyEscape:
+		m.mode = ticketViewMode
+		return m, nil
+	case tea.KeyEnter:
+		if m.ticket == nil {
+			m.mode = ticketViewMode
+			return m, nil
+		}
+		if branchModeOptions[m.branchModeCursor] == store.BranchModeCurrent {
+			m.ticket.BranchMode = store.BranchModeCurrent
+			m.ticket.Branch = ""
+			_, _ = m.store.UpdateTicket(context.Background(), *m.ticket)
+			m.mode = ticketViewMode
+			return m, nil
+		}
+		m.ticket.BranchMode = store.BranchModeWorktree
+		_, _ = m.store.UpdateTicket(context.Background(), *m.ticket)
+		m.editBuffer = m.ticket.Branch
+		if m.editBuffer == "" {
+			m.editBuffer = m.defaultBranchName()
+		}
+		m.mode = ticketEditMode
+		return m, nil
+	case tea.KeyUp:
+		if m.branchModeCursor > 0 {
+			m.branchModeCursor--
+		}
+		return m, nil
+	case tea.KeyDown:
+		if m.branchModeCursor < len(branchModeOptions)-1 {
+			m.branchModeCursor++
+		}
+		return m, nil
+	}
+
+	if msg.Type == tea.KeyRunes {
+		switch string(msg.Runes) {
+		case "j":
+			if m.branchModeCursor < len(branchModeOptions)-1 {
+				m.branchModeCursor++
+			}
+		case "k":
+			if m.branchModeCursor > 0 {
+				m.branchModeCursor--
+			}
+		}
 	}
 
 	return m, nil
@@ -723,6 +838,9 @@ func (m TicketViewModel) View() string {
 
 	for i, f := range m.fields {
 		val := f.value(m.ticket)
+		if f.label == "Branch" {
+			val = m.branchDisplay()
+		}
 		if val == "" {
 			val = "—"
 		}
@@ -764,6 +882,34 @@ func (m TicketViewModel) View() string {
 		editLine := m.editBuffer + "│"
 		b.WriteString(m.styles.EditBox.Width(innerWidth - 4).Render(editLine))
 		b.WriteString("\n")
+	}
+
+	if m.mode == ticketBranchModeSelectMode {
+		b.WriteString("\n")
+		b.WriteString(m.styles.Label.Render("Work on:"))
+		b.WriteString("\n")
+
+		for i, mode := range branchModeOptions {
+			label := branchModeLabel(mode)
+			if mode == store.BranchModeCurrent && m.currentBranch != "" {
+				label += " (" + m.currentBranch + ")"
+			}
+			if mode == store.BranchModeWorktree {
+				label += " (isolated worktree)"
+			}
+
+			prefix := "  "
+			pStyle := lipgloss.NewStyle()
+			iStyle := m.styles.Value
+			if i == m.branchModeCursor {
+				prefix = "▸ "
+				pStyle = m.styles.Cursor
+				iStyle = m.styles.Title
+			}
+
+			b.WriteString(pStyle.Render(prefix) + iStyle.Render(label))
+			b.WriteString("\n")
+		}
 	}
 
 	if m.mode == ticketAgentSelectMode {
@@ -880,7 +1026,9 @@ func (m TicketViewModel) View() string {
 	}
 
 	var footer string
-	if m.mode == ticketAgentSelectMode {
+	if m.mode == ticketBranchModeSelectMode {
+		footer = "↑/k: up │ ↓/j: down │ Enter: select │ Esc: cancel"
+	} else if m.mode == ticketAgentSelectMode {
 		footer = "↑/k: up │ ↓/j: down │ Enter: select │ Esc: cancel"
 	} else if m.mode == ticketPrioritySelectMode {
 		footer = "↑/k: up │ ↓/j: down │ Enter: select │ Esc: cancel"

@@ -92,8 +92,12 @@ func runTUI() int {
 	}
 
 	g := git.New(git.ExecRunner())
+	currentBranch := ""
 	if cwd, err := os.Getwd(); err == nil {
 		if repoRoot, err := g.RepoRoot(context.Background(), cwd); err == nil {
+			if branch, err := g.CurrentBranch(context.Background(), repoRoot); err == nil {
+				currentBranch = branch
+			}
 			wm := orchestrator.NewWorktreeManager(
 				g,
 				git.NewGH(git.ExecRunner()),
@@ -118,6 +122,7 @@ func runTUI() int {
 	app, err := tui.NewApp(cfg, s, reg, tui.AppDeps{
 		Orchestrator:   orch,
 		ActivityEvents: recv.Events(),
+		CurrentBranch:  currentBranch,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error creating app: %v\n", err)

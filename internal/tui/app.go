@@ -154,6 +154,9 @@ type AppDeps struct {
 	// ActivityEvents delivers "agent needs you" alerts from the hook receiver.
 	// Nil when no receiver is running.
 	ActivityEvents <-chan activity.Alert
+	// CurrentBranch is the branch the repository is checked out on, shown as
+	// the "current branch" choice on a ticket. Empty outside a git repo.
+	CurrentBranch string
 }
 
 type App struct {
@@ -221,7 +224,7 @@ func NewApp(cfg *config.Config, s *store.Store, reg *theme.Registry, deps AppDep
 		focus:               focusBoard,
 		view:                viewBoard,
 		kanban:              kanban,
-		ticketView:          NewTicketViewModel(s, resolver, t, agents),
+		ticketView:          NewTicketViewModel(s, resolver, t, agents).SetGitContext(deps.CurrentBranch, cfg.Git.BranchPrefix),
 		dashboard:           NewDashboardModel(s, deps.Orchestrator, resolver, agents, t),
 		generatingProposals: make(map[string]bool),
 		completionCh:        deps.Orchestrator.CompletionChan(),
