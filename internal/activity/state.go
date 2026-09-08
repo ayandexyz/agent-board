@@ -35,6 +35,11 @@ func (p payload) next() (State, bool) {
 	case "SessionStart", "UserPromptSubmit", "PreToolUse", "PostToolUse":
 		return StateActive, true
 	case "PermissionRequest":
+		// A question reaches the board as a permission request for the tool
+		// that asks it, but what is waiting is an answer, not an approval.
+		if p.ToolName == "AskUserQuestion" {
+			return StateWaitingInput, true
+		}
 		return StateBlocked, true
 	case "Stop":
 		return StateIdle, true

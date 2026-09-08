@@ -159,7 +159,7 @@ func (r *Receiver) apply(sessionID, launchID string, p payload) {
 		s.ToolName = p.ToolName
 	}
 	if next.NeedsInput() {
-		s.Detail = truncate(string(p.ToolInput), 120)
+		s.Detail = toolDetail(s.ToolName, p.ToolInput)
 	}
 	entered := !prev.NeedsInput() && next.NeedsInput()
 	title, body := r.alertText(*s)
@@ -193,18 +193,21 @@ func (r *Receiver) alertText(s Session) (string, string) {
 	if s.State == StateBlocked {
 		verb = "needs approval"
 	}
-	body := s.ToolName
-	if s.Detail != "" {
-		body = strings.TrimSpace(body + " " + s.Detail)
+	body := s.Detail
+	if body == "" {
+		body = s.ToolName
 	}
 	return fmt.Sprintf("%s %s", name, verb), body
 }
 
+// truncate cuts on runes: a byte-wise cut can split a multi-byte character and
+// leave the notification ending in a replacement glyph.
 func truncate(s string, n int) string {
-	if len(s) <= n {
+	r := []rune(s)
+	if len(r) <= n {
 		return s
 	}
-	return s[:n] + "…"
+	return string(r[:n]) + "…"
 }
 
 // NotifySend is the default Linux delivery. Failures are ignored: a missing
