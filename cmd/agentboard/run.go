@@ -116,7 +116,8 @@ func runTUI() int {
 	}
 
 	app, err := tui.NewApp(cfg, s, reg, tui.AppDeps{
-		Orchestrator: orch,
+		Orchestrator:   orch,
+		ActivityEvents: recv.Events(),
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error creating app: %v\n", err)

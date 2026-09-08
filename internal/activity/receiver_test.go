@@ -2,7 +2,9 @@ package activity
 
 import (
 	"bytes"
+	"fmt"
 	"net/http"
+	"strings"
 	"testing"
 )
 
@@ -24,9 +26,14 @@ func post(t *testing.T, base, session, launch, body string) {
 
 func newRunning(t *testing.T) (*Receiver, string, chan [2]string) {
 	t.Helper()
-	alerts := make(chan [2]string, 8)
+	alerts := make(chan [2]string, 64)
 	r := New()
-	r.Notify = func(title, body string) { alerts <- [2]string{title, body} }
+	r.Notify = func(title, body string) {
+		select {
+		case alerts <- [2]string{title, body}:
+		default:
+		}
+	}
 	base, err := r.Start()
 	if err != nil {
 		t.Fatal(err)
@@ -117,10 +124,10 @@ func TestSessionEndReason(t *testing.T) {
 
 func TestLabelUsedInNotification(t *testing.T) {
 	r, base, alerts := newRunning(t)
-	r.Label = func(string) string { return "AGT-03" }
+	r.Label = func(string) string { return "agent-1a2b3c4d" }
 	post(t, base, "s1", "", `{"hook_event_name":"Notification","notification_type":"agent_needs_input"}`)
 	a := <-alerts
-	if a[0] != "AGT-03 needs your answer" {
+	if a[0] != "agent-1a2b3c4d needs your answer" {
 		t.Errorf("title = %q", a[0])
 	}
 }
@@ -130,5 +137,37 @@ func TestUnknownEventIgnored(t *testing.T) {
 	post(t, base, "s1", "", `{"hook_event_name":"PreCompact"}`)
 	if got := r.StateOf("s1"); got != "" {
 		t.Fatalf("unknown event created state %q", got)
+	}
+}
+
+func TestEventsCarryAlert(t *testing.T) {
+	r, base, _ := newRunning(t)
+	r.Label = func(string) string { return "agent-1a2b3c4d" }
+
+	post(t, base, "s1", "", `{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"rm -rf build"}}`)
+
+	select {
+	case a := <-r.Events():
+		if a.SessionID != "s1" || a.State != StateBlocked {
+			t.Fatalf("alert = %+v", a)
+		}
+		if a.Title != "agent-1a2b3c4d needs approval" {
+			t.Errorf("title = %q", a.Title)
+		}
+		if !strings.Contains(a.Body, "rm -rf build") {
+			t.Errorf("body = %q, want the tool input", a.Body)
+		}
+	default:
+		t.Fatal("no alert published on Events()")
+	}
+}
+
+func TestEventsDroppedRatherThanBlocking(t *testing.T) {
+	r, base, _ := newRunning(t)
+	for i := 0; i < 40; i++ {
+		post(t, base, fmt.Sprintf("s%d", i), "", `{"hook_event_name":"PermissionRequest"}`)
+	}
+	if got := len(r.Events()); got != cap(r.events) {
+		t.Fatalf("buffered %d alerts, want the channel capped at %d", got, cap(r.events))
 	}
 }

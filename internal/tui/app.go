@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ayan-de/agent-board/internal/activity"
 	"github.com/ayan-de/agent-board/internal/config"
 	"github.com/ayan-de/agent-board/internal/keybinding"
 	"github.com/ayan-de/agent-board/internal/orchestrator"
@@ -150,6 +151,9 @@ type Orchestrator interface {
 
 type AppDeps struct {
 	Orchestrator Orchestrator
+	// ActivityEvents delivers "agent needs you" alerts from the hook receiver.
+	// Nil when no receiver is running.
+	ActivityEvents <-chan activity.Alert
 }
 
 type App struct {
@@ -168,8 +172,10 @@ type App struct {
 	mergeModal   MergeModal
 	textInput    TextInputModal
 	notification NotificationStack
-	quit         bool
-	runCommand   tea.Cmd
+
+	activityEvents <-chan activity.Alert
+	quit           bool
+	runCommand     tea.Cmd
 
 	kanban       KanbanModel
 	ticketView   TicketViewModel
@@ -208,6 +214,7 @@ func NewApp(cfg *config.Config, s *store.Store, reg *theme.Registry, deps AppDep
 	a := &App{
 		store:               s,
 		orchestrator:        deps.Orchestrator,
+		activityEvents:      deps.ActivityEvents,
 		resolver:            resolver,
 		config:              cfg,
 		registry:            reg,
@@ -254,12 +261,33 @@ func (a *App) applyTheme() {
 	a.notification.SetTheme(t)
 }
 
+// activityNotificationDuration is how long an "agent needs you" card stays up.
+const activityNotificationDuration = 20 * time.Second
+
+// waitForActivityCmd blocks on the next agent alert and re-arms itself, the
+// same shape as the run-completion listener.
+func (a *App) waitForActivityCmd() tea.Cmd {
+	if a.activityEvents == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		alert, ok := <-a.activityEvents
+		if !ok {
+			return nil
+		}
+		return alert
+	}
+}
+
 func (a *App) Init() tea.Cmd {
 	// Always arm the animation tick at startup. The kanban only advances
 	// its animFrame when an agent is active, so idle ticks are cheap.
 	cmds := []tea.Cmd{tea.EnterAltScreen}
 	if a.kanban.NeedsTick() {
 		cmds = append(cmds, animationTick())
+	}
+	if c := a.waitForActivityCmd(); c != nil {
+		cmds = append(cmds, c)
 	}
 	return tea.Batch(cmds...)
 }
@@ -419,6 +447,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			nil,
 		)
 		return a, nil
+	case activity.Alert:
+		// Longer than the usual toast: this one is a request for the user to
+		// go do something, not a report that something happened. It has to
+		// survive them looking away from the board.
+		variant := NotificationWarning
+		if msg.State == activity.StateBlocked {
+			variant = NotificationError
+		}
+		return a, tea.Batch(
+			a.notification.Show(msg.Title, msg.Body, variant, activityNotificationDuration),
+			a.waitForActivityCmd(),
+		)
+
 	case notificationMsg:
 		return a, a.showNotification(msg.title, msg.message, msg.variant)
 	case searchQueryMsg:

@@ -18,15 +18,24 @@ type Session struct {
 	Detail   string
 }
 
+// Alert is one "this session needs a human" event, ready to render.
+type Alert struct {
+	SessionID string
+	State     State
+	Title     string
+	Body      string
+}
+
 // Receiver is the loopback HTTP endpoint spawned agents report to.
 type Receiver struct {
 	// Notify delivers a "needs you" alert. Defaults to notify-send.
 	Notify func(title, body string)
 	// Label turns a session id into something a human recognises, usually the
-	// ticket id. Defaults to the session id.
+	// tmux window it runs in. Defaults to the session id.
 	Label func(sessionID string) string
-	// OnChange fires after any state change, for the TUI to redraw.
-	OnChange func()
+	// events carries needs-input entries to the TUI. Buffered and dropped on
+	// overflow: a stalled reader must never block a hook request.
+	events chan Alert
 
 	mu       sync.Mutex
 	sessions map[string]*Session
@@ -41,6 +50,7 @@ func New() *Receiver {
 		Notify:   NotifySend,
 		sessions: make(map[string]*Session),
 		launches: make(map[string]string),
+		events:   make(chan Alert, 16),
 	}
 }
 
@@ -155,13 +165,21 @@ func (r *Receiver) apply(sessionID, launchID string, p payload) {
 	title, body := r.alertText(*s)
 	r.mu.Unlock()
 
-	if entered && r.Notify != nil {
+	if !entered {
+		return
+	}
+	if r.Notify != nil {
 		r.Notify(title, body)
 	}
-	if r.OnChange != nil {
-		r.OnChange()
+	select {
+	case r.events <- Alert{SessionID: s.ID, State: s.State, Title: title, Body: body}:
+	default:
 	}
 }
+
+// Events yields a session each time it starts needing a human. Consumed by the
+// TUI to raise an in-app notification alongside the desktop one.
+func (r *Receiver) Events() <-chan Alert { return r.events }
 
 // alertText must be called with the lock held.
 func (r *Receiver) alertText(s Session) (string, string) {
