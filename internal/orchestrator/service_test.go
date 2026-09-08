@@ -219,19 +219,16 @@ func TestStartAdHocRunInstallsClaudeHookSettings(t *testing.T) {
 		t.Fatalf("StartAdHocRun() error = %v", err)
 	}
 
-	if len(cr.last.Args) != 2 || cr.last.Args[0] != "--settings" {
-		t.Fatalf("Args = %v, want --settings <json>", cr.last.Args)
-	}
 	want := "http://127.0.0.1:9999/hooks/" + sess.ID
-	if !strings.Contains(cr.last.Args[1], want) {
-		t.Errorf("settings do not point at %s: %s", want, cr.last.Args[1])
+	if !strings.Contains(cr.last.Settings, want) {
+		t.Errorf("settings do not point at %s: %s", want, cr.last.Settings)
 	}
-	if !strings.Contains(cr.last.Args[1], `"PermissionRequest"`) {
-		t.Errorf("settings register no PermissionRequest hook: %s", cr.last.Args[1])
+	if !strings.Contains(cr.last.Settings, `"PermissionRequest"`) {
+		t.Errorf("settings register no PermissionRequest hook: %s", cr.last.Settings)
 	}
 }
 
-func TestStartAdHocRunWithoutHookURLPassesNoSettings(t *testing.T) {
+func TestStartAdHocRunWithoutHookURLBuildsNoSettings(t *testing.T) {
 	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01"}}
 	cr := &capturingRunner{}
 	svc := orchestrator.NewService(fs, nil, nil, nil)
@@ -240,8 +237,8 @@ func TestStartAdHocRunWithoutHookURLPassesNoSettings(t *testing.T) {
 	if _, err := svc.StartAdHocRun(context.Background(), "AGT-01", "claude-code", "do it"); err != nil {
 		t.Fatalf("StartAdHocRun() error = %v", err)
 	}
-	if len(cr.last.Args) != 0 {
-		t.Errorf("Args = %v, want none with no receiver running", cr.last.Args)
+	if cr.last.Settings != "" {
+		t.Errorf("Settings = %s, want none with no receiver running", cr.last.Settings)
 	}
 }
 
@@ -255,7 +252,7 @@ func TestStartAdHocRunLeavesOtherAgentsUnflagged(t *testing.T) {
 	if _, err := svc.StartAdHocRun(context.Background(), "AGT-01", "freecode", "do it"); err != nil {
 		t.Fatalf("StartAdHocRun() error = %v", err)
 	}
-	if len(cr.last.Args) != 0 {
-		t.Errorf("Args = %v, want none for a non-claude agent", cr.last.Args)
+	if cr.last.Settings != "" {
+		t.Errorf("Settings = %s, want none for a non-claude agent", cr.last.Settings)
 	}
 }

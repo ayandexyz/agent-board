@@ -217,5 +217,5 @@ Sessions 1, 2, 4, 5 keep streaming their own hooks throughout. None of this depe
 
 ## Open questions
 
-- Whether to install hooks via `--settings` inline or write `.claude/settings.local.json` into the worktree. Inline keeps the worktree clean and is per process. Chosen: inline.
+- Whether to install hooks via `--settings` inline or write `.claude/settings.local.json` into the worktree. Chosen: neither exactly — the document is cached as `~/.agentboard/cache/settings-<sessionID>.json` and passed by path. It is still per process and still out of the worktree, but inline JSON turned the pane's launch line into a kilobyte of unreadable scrollback.
 - Notification click-to-focus needs a helper that runs `tmux select-window`. `notify-send --action` is available on recent libnotify; otherwise the body just names the session.

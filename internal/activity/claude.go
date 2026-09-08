@@ -1,9 +1,6 @@
 package activity
 
-import (
-	"encoding/json"
-	"strings"
-)
+import "encoding/json"
 
 // Events Claude Code reports to the board. PermissionRequest is the only one
 // the agent will wait on for an answer; the rest are lifecycle reports.
@@ -67,6 +64,5 @@ func ClaudeSettingsJSON(hookURL string) string {
 	if err != nil {
 		return ""
 	}
-	// The document is typed into the pane as one single-quoted shell word.
-	return strings.ReplaceAll(string(raw), "'", "")
+	return string(raw)
 }

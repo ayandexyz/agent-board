@@ -76,13 +76,13 @@ func (s *Service) SetLaunchNotifier(f func(sessionID, launchID string)) {
 // launchSpec is the identity a spawned agent reports back with. The launch id
 // lets the board drop hooks from an earlier launch of the same session, whose
 // late events would otherwise corrupt the current one's state.
-func (s *Service) launchSpec(agent, sessionID, launchID string) ([]string, []string) {
+func (s *Service) launchSpec(agent, sessionID, launchID string) ([]string, string) {
 	env := []string{
 		"AGENTBOARD_SESSION_ID=" + sessionID,
 		"AGENTBOARD_LAUNCH_ID=" + launchID,
 	}
 	if s.hookBaseURL == "" {
-		return env, nil
+		return env, ""
 	}
 	if s.onLaunch != nil {
 		s.onLaunch(sessionID, launchID)
@@ -90,7 +90,7 @@ func (s *Service) launchSpec(agent, sessionID, launchID string) ([]string, []str
 	hookURL := s.hookBaseURL + "/hooks/" + sessionID
 	env = append(env, "AGENTBOARD_HOOK_URL="+s.hookBaseURL)
 
-	var args []string
+	var settings string
 	switch agent {
 	// FreeCode reads its own variable and posts Claude-shaped hook payloads to
 	// this exact per-session URL.
@@ -99,9 +99,9 @@ func (s *Service) launchSpec(agent, sessionID, launchID string) ([]string, []str
 	// Claude Code takes its hooks per process, so nothing is written into the
 	// ticket worktree and no earlier launch's settings can linger.
 	case "claude-code", "claudecode":
-		args = []string{"--settings", activity.ClaudeSettingsJSON(hookURL)}
+		settings = activity.ClaudeSettingsJSON(hookURL)
 	}
-	return env, args
+	return env, settings
 }
 
 func (s *Service) SetWorktrees(w Worktrees) {
@@ -186,7 +186,7 @@ func (s *Service) StartAdHocRun(ctx context.Context, ticketID, agent, prompt str
 
 	var handle RunHandle
 	if s.agentRunner != nil {
-		env, args := s.launchSpec(agent, session.ID, uuid.NewString())
+		env, settings := s.launchSpec(agent, session.ID, uuid.NewString())
 		handle, err = s.agentRunner.Start(ctx, RunRequest{
 			TicketID:   ticketID,
 			SessionID:  session.ID,
@@ -196,7 +196,7 @@ func (s *Service) StartAdHocRun(ctx context.Context, ticketID, agent, prompt str
 			Reporter:   func(line string) { s.AppendLog(session.ID, line) },
 			OnComplete: onComplete,
 			Env:        env,
-			Args:       args,
+			Settings:   settings,
 		})
 	} else {
 		return store.Session{}, fmt.Errorf("no runner configured")
@@ -344,7 +344,7 @@ func (s *Service) StartApprovedRun(ctx context.Context, proposalID string) (stor
 
 	var handle RunHandle
 	if s.agentRunner != nil {
-		env, args := s.launchSpec(proposal.Agent, session.ID, uuid.NewString())
+		env, settings := s.launchSpec(proposal.Agent, session.ID, uuid.NewString())
 		handle, err = s.agentRunner.Start(ctx, RunRequest{
 			TicketID:   proposal.TicketID,
 			SessionID:  session.ID,
@@ -354,7 +354,7 @@ func (s *Service) StartApprovedRun(ctx context.Context, proposalID string) (stor
 			Reporter:   func(line string) { s.AppendLog(session.ID, line) },
 			OnComplete: onComplete,
 			Env:        env,
-			Args:       args,
+			Settings:   settings,
 		})
 	} else {
 		return store.Session{}, fmt.Errorf("no runner configured")

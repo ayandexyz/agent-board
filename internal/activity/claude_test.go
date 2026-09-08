@@ -2,7 +2,6 @@ package activity
 
 import (
 	"encoding/json"
-	"strings"
 	"testing"
 )
 
@@ -73,12 +72,5 @@ func TestClaudeSettingsTimeouts(t *testing.T) {
 	}
 	if got := doc.Hooks["PermissionRequest"][0].Hooks[0].Timeout; got < 60 {
 		t.Errorf("PermissionRequest timeout = %d, want a human-scale wait", got)
-	}
-}
-
-// The settings travel as a single-quoted shell word typed into the pane.
-func TestClaudeSettingsHasNoSingleQuote(t *testing.T) {
-	if strings.Contains(ClaudeSettingsJSON("http://127.0.0.1:1234/hooks/SES-01"), "'") {
-		t.Fatal("settings JSON contains a single quote and cannot be shell-quoted")
 	}
 }

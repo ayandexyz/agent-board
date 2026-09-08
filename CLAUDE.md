@@ -257,13 +257,16 @@ Every agent pane is launched with its session identity exported via `tmux new-wi
 | `FREECODE_HOOK_URL` | FreeCode only: `<base>/hooks/<sessionID>` |
 
 Claude Code takes no environment variable of its own. It is launched as
-`claude --settings '<inline json>'`, built by `activity.ClaudeSettingsJSON`,
+`claude --settings ~/.agentboard/cache/settings-<sessionID>.json`, whose
+contents are built by `activity.ClaudeSettingsJSON`,
 registering an `http` hook at `<base>/hooks/<sessionID>` for `SessionStart`,
 `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PermissionRequest`,
 `Notification`, `Stop` and `SessionEnd`. The launch id rides along as the
 `X-Agentboard-Launch` header, interpolated from `$AGENTBOARD_LAUNCH_ID` in the
-pane — which Claude Code only does because `allowedEnvVars` lists it. Inline
-settings keep the ticket worktree clean and cannot outlive the process.
+pane — which Claude Code only does because `allowedEnvVars` lists it. The
+document is cached next to the prompt file rather than passed inline: a
+kilobyte of JSON typed into the pane buries the launch line in the user's
+scrollback. It stays out of the ticket worktree either way.
 
 Hooks block the turn, so lifecycle reports time out after 5 s; only
 `PermissionRequest` waits (600 s), since that one is a human decision. Note the
@@ -272,8 +275,9 @@ two agents disagree on the reply shape: Claude Code wants
 `decision: "allow"`. `PermissionRequest` from Claude Code carries no
 `tool_use_id`.
 
-The extra arguments reach the pane through `RunRequest.Args`, single-quoted into
-the launch line by `agentCommand` in `internal/orchestrator/pty_runner.go`.
+The document reaches the pane through `RunRequest.Settings`; `launchArgs` in
+`internal/orchestrator/pty_runner.go` caches it and `agentCommand` quotes the
+path into the launch line.
 
 Nothing is exported unless `Service.SetHookBaseURL` was called, so an agent is never told to reach a receiver that is not running.
 

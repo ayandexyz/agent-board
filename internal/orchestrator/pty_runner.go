@@ -34,6 +34,20 @@ func newWindowArgs(sessionName, windowName, workDir string, env []string) []stri
 	return args
 }
 
+// launchArgs caches an agent's settings document and returns the arguments that
+// point the agent at it. The document is a kilobyte of JSON; typed into the
+// pane it would bury the launch line in the user's scrollback.
+func launchArgs(cacheDir, sessionID, settings string) ([]string, error) {
+	if settings == "" {
+		return nil, nil
+	}
+	path := fmt.Sprintf("%s/settings-%s.json", cacheDir, sessionID)
+	if err := os.WriteFile(path, []byte(settings), 0644); err != nil {
+		return nil, fmt.Errorf("orchestrator.launchArgs: %w", err)
+	}
+	return []string{"--settings", path}, nil
+}
+
 // agentCommand is the line typed into the pane to launch the agent. Arguments
 // are single quoted because one of them is an inline JSON document.
 func agentCommand(bin string, args []string) string {
@@ -81,7 +95,12 @@ func (r *tmuxAgentRunner) Start(ctx context.Context, req RunRequest) (RunHandle,
 		return RunHandle{}, fmt.Errorf("write prompt file: %w", err)
 	}
 
-	if err := exec.Command("tmux", "send-keys", "-t", paneID, agentCommand(cfg.Bin, req.Args), "Enter").Run(); err != nil {
+	args, err := launchArgs(cacheDir, req.SessionID, req.Settings)
+	if err != nil {
+		return RunHandle{}, err
+	}
+
+	if err := exec.Command("tmux", "send-keys", "-t", paneID, agentCommand(cfg.Bin, args), "Enter").Run(); err != nil {
 		return RunHandle{}, fmt.Errorf("send bin to pane: %w", err)
 	}
 

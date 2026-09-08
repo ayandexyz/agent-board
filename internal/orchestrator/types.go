@@ -37,9 +37,9 @@ type RunRequest struct {
 	// Env is exported into the agent's tmux window as KEY=VALUE pairs. It
 	// carries the session identity an agent's hooks report back with.
 	Env []string
-	// Args are appended to the agent's own launch command, e.g. the inline
-	// --settings document that registers Claude Code's hooks.
-	Args []string
+	// Settings is an agent-specific settings document, cached to a file by the
+	// runner and passed to the agent by path. Claude Code's hooks live here.
+	Settings string
 }
 
 type WorktreeInfo struct {
