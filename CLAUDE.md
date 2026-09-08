@@ -291,6 +291,23 @@ See `docs/superpowers/specs/2026-09-08-agent-activity-tracking-design.md` and `d
 
 Every ticket gets an isolated git worktree when an agent starts on it, so parallel agents never collide on the filesystem.
 
+### Branch mode (per ticket)
+
+The ticket's Branch row is a toggle, not a text field: `e` on it opens
+**Current branch | Worktree branch**.
+
+- `worktree` (default, `tickets.branch_mode`): existing behaviour — the agent
+  gets its own worktree and `agent/<ticket-id>` branch, and Review -> Done is
+  merge-gated.
+- `current`: no worktree. `prepareWorkDir` returns an empty work dir so the
+  agent runs in the board's own checkout on whatever branch is already out, and
+  `MoveTicketStatus` skips the merge gate.
+
+Choosing "Worktree branch" drops straight into an edit box prefilled with the
+default branch name so it can be renamed before the agent starts. Choosing
+"Current branch" clears `tickets.branch`. `store.Ticket.UsesWorktree()` is the
+single predicate everything else reads.
+
 ### Lifecycle
 
 ```
