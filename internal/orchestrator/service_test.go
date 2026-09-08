@@ -2,6 +2,7 @@ package orchestrator_test
 
 import (
 	"context"
+	"strings"
 	"testing"
 
 	"github.com/ayan-de/agent-board/internal/orchestrator"
@@ -131,5 +132,77 @@ func TestFinishRunPersistsContextCarry(t *testing.T) {
 	}
 	if fs.lastContextCarry.Summary != "short handoff summary" {
 		t.Fatalf("Summary = %q, want short handoff summary", fs.lastContextCarry.Summary)
+	}
+}
+
+func envValue(env []string, key string) (string, bool) {
+	for _, kv := range env {
+		if strings.HasPrefix(kv, key+"=") {
+			return strings.TrimPrefix(kv, key+"="), true
+		}
+	}
+	return "", false
+}
+
+func TestStartAdHocRunExportsSessionEnv(t *testing.T) {
+	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01"}}
+	cr := &capturingRunner{}
+	svc := orchestrator.NewService(fs, nil, nil, nil)
+	svc.SetAgentRunner(cr)
+	svc.SetHookBaseURL("http://127.0.0.1:9999")
+
+	sess, err := svc.StartAdHocRun(context.Background(), "AGT-01", "claude-code", "do it")
+	if err != nil {
+		t.Fatalf("StartAdHocRun() error = %v", err)
+	}
+
+	if got, _ := envValue(cr.last.Env, "AGENTBOARD_SESSION_ID"); got != sess.ID {
+		t.Errorf("AGENTBOARD_SESSION_ID = %q, want %q", got, sess.ID)
+	}
+	if got, ok := envValue(cr.last.Env, "AGENTBOARD_LAUNCH_ID"); !ok || got == "" {
+		t.Error("AGENTBOARD_LAUNCH_ID missing or empty")
+	}
+	if got, _ := envValue(cr.last.Env, "AGENTBOARD_HOOK_URL"); got != "http://127.0.0.1:9999" {
+		t.Errorf("AGENTBOARD_HOOK_URL = %q", got)
+	}
+	if _, ok := envValue(cr.last.Env, "FREECODE_HOOK_URL"); ok {
+		t.Error("non-freecode agent should not get FREECODE_HOOK_URL")
+	}
+}
+
+func TestStartAdHocRunFreecodeGetsHookURL(t *testing.T) {
+	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01"}}
+	cr := &capturingRunner{}
+	svc := orchestrator.NewService(fs, nil, nil, nil)
+	svc.SetAgentRunner(cr)
+	svc.SetHookBaseURL("http://127.0.0.1:9999/")
+
+	sess, err := svc.StartAdHocRun(context.Background(), "AGT-01", "freecode", "do it")
+	if err != nil {
+		t.Fatalf("StartAdHocRun() error = %v", err)
+	}
+
+	want := "http://127.0.0.1:9999/hooks/" + sess.ID
+	if got, _ := envValue(cr.last.Env, "FREECODE_HOOK_URL"); got != want {
+		t.Errorf("FREECODE_HOOK_URL = %q, want %q", got, want)
+	}
+}
+
+func TestStartAdHocRunWithoutHookURLExportsNoHookEnv(t *testing.T) {
+	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01"}}
+	cr := &capturingRunner{}
+	svc := orchestrator.NewService(fs, nil, nil, nil)
+	svc.SetAgentRunner(cr)
+
+	if _, err := svc.StartAdHocRun(context.Background(), "AGT-01", "freecode", "do it"); err != nil {
+		t.Fatalf("StartAdHocRun() error = %v", err)
+	}
+	for _, key := range []string{"AGENTBOARD_HOOK_URL", "FREECODE_HOOK_URL"} {
+		if _, ok := envValue(cr.last.Env, key); ok {
+			t.Errorf("%s exported with no hook receiver configured", key)
+		}
+	}
+	if _, ok := envValue(cr.last.Env, "AGENTBOARD_SESSION_ID"); !ok {
+		t.Error("AGENTBOARD_SESSION_ID should always be exported")
 	}
 }

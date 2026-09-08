@@ -34,6 +34,9 @@ type RunRequest struct {
 	Reporter   func(string)
 	Target     string
 	OnComplete func(outcome, summary, resumeCommand string)
+	// Env is exported into the agent's tmux window as KEY=VALUE pairs. It
+	// carries the session identity an agent's hooks report back with.
+	Env []string
 }
 
 type WorktreeInfo struct {

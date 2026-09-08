@@ -21,10 +21,15 @@ func NewTmuxAgentRunner(tmuxSession string) (*tmuxAgentRunner, error) {
 	}, nil
 }
 
-func newWindowArgs(sessionName, windowName, workDir string) []string {
+func newWindowArgs(sessionName, windowName, workDir string, env []string) []string {
 	args := []string{"new-window", "-t", sessionName, "-d", "-a", "-P", "-F", "#{window_id}:#{pane_id}", "-n", windowName}
 	if workDir != "" {
 		args = append(args, "-c", workDir)
+	}
+	// -e sets the variable for the new pane only, so each agent sees its own
+	// session identity without touching the tmux server environment.
+	for _, kv := range env {
+		args = append(args, "-e", kv)
 	}
 	return args
 }
@@ -37,7 +42,7 @@ func (r *tmuxAgentRunner) Start(ctx context.Context, req RunRequest) (RunHandle,
 
 	windowName := fmt.Sprintf("agent-%s", shortID(req.SessionID, 8))
 
-	cmd := exec.Command("tmux", newWindowArgs(sessionName, windowName, req.WorkDir)...)
+	cmd := exec.Command("tmux", newWindowArgs(sessionName, windowName, req.WorkDir, req.Env)...)
 	output, err := cmd.Output()
 	if err != nil {
 		return RunHandle{}, fmt.Errorf("create tmux window: %w", err)

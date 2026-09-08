@@ -4,26 +4,30 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strings"
 	"sync"
+
+	"github.com/google/uuid"
 
 	"github.com/ayan-de/agent-board/internal/llm"
 	"github.com/ayan-de/agent-board/internal/store"
 )
 
 type Service struct {
-	store      Store
-	llm        LLMClient
-	runner     Runner
-	agentRunner  AgentRunner
-	ctx        ContextCarryProvider
+	store         Store
+	llm           LLMClient
+	runner        Runner
+	agentRunner   AgentRunner
+	ctx           ContextCarryProvider
 	worktrees     Worktrees
 	merger        Merger
 	mergeStrategy MergeStrategy
 	logs          map[string][]string
-	mu         sync.RWMutex
+	mu            sync.RWMutex
 
 	activeSessions map[string]*AgentSession
 	completionCh   chan RunCompletion
+	hookBaseURL    string
 }
 
 // AgentSession tracks an active agent session
@@ -52,6 +56,33 @@ func NewService(store Store, llm LLMClient, runner Runner, ctx ContextCarryProvi
 
 func (s *Service) SetAgentRunner(pr AgentRunner) {
 	s.agentRunner = pr
+}
+
+// SetHookBaseURL points spawned agents at the board's local hook receiver.
+// Empty (the default) means no receiver is running, and no hook environment is
+// exported at all — an agent that cannot reach the board must not be told to try.
+func (s *Service) SetHookBaseURL(url string) {
+	s.hookBaseURL = strings.TrimRight(url, "/")
+}
+
+// launchEnv is the identity a spawned agent reports back with. The launch id
+// lets the board drop hooks from an earlier launch of the same session, whose
+// late events would otherwise corrupt the current one's state.
+func (s *Service) launchEnv(agent, sessionID, launchID string) []string {
+	env := []string{
+		"AGENTBOARD_SESSION_ID=" + sessionID,
+		"AGENTBOARD_LAUNCH_ID=" + launchID,
+	}
+	if s.hookBaseURL == "" {
+		return env
+	}
+	env = append(env, "AGENTBOARD_HOOK_URL="+s.hookBaseURL)
+	// FreeCode reads its own variable and posts Claude-shaped hook payloads to
+	// this exact per-session URL.
+	if agent == "freecode" {
+		env = append(env, "FREECODE_HOOK_URL="+s.hookBaseURL+"/hooks/"+sessionID)
+	}
+	return env
 }
 
 func (s *Service) SetWorktrees(w Worktrees) {
@@ -119,17 +150,17 @@ func (s *Service) StartAdHocRun(ctx context.Context, ticketID, agent, prompt str
 
 	onComplete := func(outcome, summary, resumeCommand string) {
 		_ = s.FinishRun(context.Background(), FinishRunInput{
-			TicketID:  ticketID,
-			SessionID: session.ID,
-			Outcome:   outcome,
-			Summary:   summary,
+			TicketID:      ticketID,
+			SessionID:     session.ID,
+			Outcome:       outcome,
+			Summary:       summary,
 			ResumeCommand: resumeCommand,
 		})
 		s.completionCh <- RunCompletion{
-			TicketID:  ticketID,
-			SessionID: session.ID,
-			Outcome:   outcome,
-			Summary:   summary,
+			TicketID:      ticketID,
+			SessionID:     session.ID,
+			Outcome:       outcome,
+			Summary:       summary,
 			ResumeCommand: resumeCommand,
 		}
 	}
@@ -144,6 +175,7 @@ func (s *Service) StartAdHocRun(ctx context.Context, ticketID, agent, prompt str
 			WorkDir:    workDir,
 			Reporter:   func(line string) { s.AppendLog(session.ID, line) },
 			OnComplete: onComplete,
+			Env:        s.launchEnv(agent, session.ID, uuid.NewString()),
 		})
 	} else {
 		return store.Session{}, fmt.Errorf("no runner configured")
@@ -274,17 +306,17 @@ func (s *Service) StartApprovedRun(ctx context.Context, proposalID string) (stor
 
 	onComplete := func(outcome, summary, resumeCommand string) {
 		_ = s.FinishRun(context.Background(), FinishRunInput{
-			TicketID:  proposal.TicketID,
-			SessionID: session.ID,
-			Outcome:   outcome,
-			Summary:   summary,
+			TicketID:      proposal.TicketID,
+			SessionID:     session.ID,
+			Outcome:       outcome,
+			Summary:       summary,
 			ResumeCommand: resumeCommand,
 		})
 		s.completionCh <- RunCompletion{
-			TicketID:  proposal.TicketID,
-			SessionID: session.ID,
-			Outcome:   outcome,
-			Summary:   summary,
+			TicketID:      proposal.TicketID,
+			SessionID:     session.ID,
+			Outcome:       outcome,
+			Summary:       summary,
 			ResumeCommand: resumeCommand,
 		}
 	}
@@ -299,6 +331,7 @@ func (s *Service) StartApprovedRun(ctx context.Context, proposalID string) (stor
 			WorkDir:    workDir,
 			Reporter:   func(line string) { s.AppendLog(session.ID, line) },
 			OnComplete: onComplete,
+			Env:        s.launchEnv(proposal.Agent, session.ID, uuid.NewString()),
 		})
 	} else {
 		return store.Session{}, fmt.Errorf("no runner configured")
@@ -434,16 +467,16 @@ func (s *Service) GetPaneContent(sessionID string, lines int) (string, error) {
 
 // SwitchToPane switches the tmux view to a specific pane
 func (s *Service) SwitchToPane(sessionID string) error {
-    // Try TmuxRunner first
-    if tmuxRunner, ok := s.runner.(*TmuxRunner); ok {
-        pm := tmuxRunner.GetPaneManager()
-        return pm.SwitchToPane(sessionID)
-    }
-    // Try PtyRunner
-    if s.agentRunner != nil {
-        if paneID, ok := s.agentRunner.GetPaneID(sessionID); ok {
-            return exec.Command("tmux", "select-pane", "-t", paneID).Run()
-        }
-    }
-    return fmt.Errorf("pane switching only available with TmuxRunner or AgentRunner")
+	// Try TmuxRunner first
+	if tmuxRunner, ok := s.runner.(*TmuxRunner); ok {
+		pm := tmuxRunner.GetPaneManager()
+		return pm.SwitchToPane(sessionID)
+	}
+	// Try PtyRunner
+	if s.agentRunner != nil {
+		if paneID, ok := s.agentRunner.GetPaneID(sessionID); ok {
+			return exec.Command("tmux", "select-pane", "-t", paneID).Run()
+		}
+	}
+	return fmt.Errorf("pane switching only available with TmuxRunner or AgentRunner")
 }
