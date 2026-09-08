@@ -391,14 +391,16 @@ func (s *Service) GetActiveSessions() []*AgentSession {
 }
 
 // GetActiveSessionByTicket returns the active session for a ticket
-// TicketForSession returns the ticket a live session belongs to, or "".
-func (s *Service) TicketForSession(sessionID string) string {
+// WindowForSession returns the tmux window name a live session runs in, so a
+// notification can name the window the user has to switch to. Mirrors the name
+// tmuxAgentRunner.Start gives the window.
+func (s *Service) WindowForSession(sessionID string) string {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
-	if sess, ok := s.activeSessions[sessionID]; ok {
-		return sess.TicketID
+	if _, ok := s.activeSessions[sessionID]; !ok {
+		return ""
 	}
-	return ""
+	return "agent-" + shortID(sessionID, 8)
 }
 
 func (s *Service) GetActiveSessionByTicket(ticketID string) (*AgentSession, bool) {

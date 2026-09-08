@@ -82,7 +82,7 @@ func runTUI() int {
 	}
 
 	recv := activity.New()
-	recv.Label = orch.TicketForSession
+	recv.Label = orch.WindowForSession
 	if base, err := recv.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: activity receiver unavailable: %v\n", err)
 	} else {
