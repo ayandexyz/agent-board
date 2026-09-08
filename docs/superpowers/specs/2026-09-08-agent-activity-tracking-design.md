@@ -42,6 +42,7 @@ Vendor signal sources, ranked by reliability:
 | OpenCode | One `opencode serve --port N`; each worktree driven with `?directory=`. SSE `GET /event`: `permission.asked`, `question.asked`, `session.status`, `session.idle`. | `POST /session/{id}/permissions/{permId}`, `POST /question/{id}/reply`. |
 | Cursor CLI | `.cursor/hooks.json` in the worktree: `beforeShellExecution`, `beforeMCPExecution`, `stop`. | Hook stdout `{"permission":"allow"|"deny"}`. |
 | Codex | `~/.codex/hooks.json`: `PermissionRequest`, `Stop`, `SessionEnd`. | Hook decision. |
+| FreeCode (own agent, `~/Project/freecode`) | Built-in `board-webhook` hook inside FreeCode, enabled by `FREECODE_HOOK_URL`. Emits the same JSON shape as Claude Code hooks, so the board's Claude mapper and receiver are reused unchanged. | Same held `PermissionRequest` response; FreeCode maps `allow` to `allow-once` via `answerPermission` and `deny` to `rejectPermission`. |
 | Unknown agent | `tmux capture-pane -p -e -J`, hashed, stable across several polls, plus a structural prompt match. | `send-keys -l`, pause, `Enter`, re-capture to verify. |
 
 tmux's own `monitor-activity` / `monitor-silence` hooks fire only for windows that are not visible, so they cannot be the primary mechanism.
@@ -140,6 +141,22 @@ AGENTBOARD_HOOK_URL
 
 OpenCode moves off PTY typing entirely: the orchestrator owns one `opencode serve` process and creates sessions over HTTP with the worktree as `directory`. The tmux window then runs `opencode attach` for display. This is a separate phase.
 
+### FreeCode
+
+FreeCode is a TypeScript agent split into a `freecode serve` JSON-RPC backend and a thin TUI. Its core already has a hook registry with 14 events, an in-process bus that publishes `permission.asked` and `question.asked`, a pending-promise permission flow with `answerPermission(requestId, answer)` and `rejectPermission(requestId)`, and a `question` tool. Nothing in the board needs a FreeCode-specific mapper.
+
+Changes inside FreeCode:
+
+- New `apps/core/src/hooks/builtin/board-webhook.ts`, registered from `initHooks` in `hooks/bootstrap.ts` next to the rtk hook. Inert unless `FREECODE_HOOK_URL` is set.
+- It registers callback hooks for `SessionStart`, `TurnStart`, `PreToolUse`, `PostToolUse`, `Stop`, and POSTs a Claude-shaped body: `hook_event_name`, `session_id`, `tool_name`, `tool_use_id`, `tool_input`. `TurnStart` is sent as `UserPromptSubmit` because FreeCode's own `UserPromptSubmit` carries the system prompt. Every request carries `X-Agentboard-Launch: $AGENTBOARD_LAUNCH_ID`.
+- It subscribes to `permission.asked` and POSTs `hook_event_name: PermissionRequest` with the tool name and args, waiting up to FreeCode's own 30 minute prompt timeout. A reply with `hookSpecificOutput.decision` of `allow` calls `answerPermission` with `allow-once`; `deny` calls `rejectPermission`; an empty reply leaves the pane picker to the user. The picker and the webhook race; whoever answers first wins, which FreeCode already handles.
+- It subscribes to `question.asked` and POSTs `hook_event_name: Notification, notification_type: agent_needs_input`. The answer is typed in the pane; the board clears `waiting_input` at the next turn boundary.
+- `executeTool` in `agent/loop.ts` adds `toolUseId: toolCall.id` to the hook context so PreToolUse and PostToolUse can carry the id the tool-flight rule needs.
+
+Changes inside the board: for agent `freecode`, export `FREECODE_HOOK_URL=<hookBaseURL>/hooks/<sessionID>` alongside the three common variables. No `--settings` argument.
+
+Not covered: FreeCode sends no `SessionEnd`; process exit is still detected by the pane monitor.
+
 ### TUI
 
 - Ticket card glyph: `●` active, `○` idle, `?` waiting_input, `!` blocked, `×` exited, `~` no_signal.
@@ -181,8 +198,9 @@ Sessions 1, 2, 4, 5 keep streaming their own hooks throughout. None of this depe
 3. Waiting overlay and `Resolve` with InputGuard.
 4. Fallback reconciler.
 5. OpenCode over `opencode serve`. Deletes the PTY character injection.
-6. Cursor and Codex mappers.
-7. WebSocket subscriber for the mobile app.
+6. FreeCode built-in webhook plus board env export.
+7. Cursor and Codex mappers.
+8. WebSocket subscriber for the mobile app.
 
 ## Open questions
 

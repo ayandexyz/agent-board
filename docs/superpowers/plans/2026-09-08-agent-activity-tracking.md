@@ -21,7 +21,8 @@
 - Activity states are exactly: `active`, `idle`, `waiting_input`, `blocked`, `exited`. TUI also renders a derived `no_signal`.
 - Reconciler may never write `blocked` and may never clear a sticky state.
 - Notifications fire only on entry into the needs-input family.
-- This plan covers spec phases 1 to 4. Phases 5 to 7 (OpenCode server, Cursor and Codex mappers, WebSocket) are separate plans.
+- This plan covers spec phases 1 to 4 and phase 6 (FreeCode). Phases 5, 7, and 8 (OpenCode server, Cursor and Codex mappers, WebSocket) are separate plans.
+- FreeCode tasks edit the sibling repo at `/home/ayande/Project/freecode` (TypeScript, pnpm, `node:test` via `pnpm --filter @freecode/core test`). Commit there separately with the same conventional-commit style.
 
 ---
 
@@ -58,6 +59,15 @@ Modified:
 | `internal/keybinding/action.go`, `keymap.go` | `ActionShowWaiting` bound to `w`. |
 | `cmd/agentboard/run.go` | Construct activity service, receiver, notifier, reconciler. |
 | `CLAUDE.md` | Document the activity subsystem and the `w` key. |
+
+FreeCode repo (`/home/ayande/Project/freecode`):
+
+| File | Change |
+|---|---|
+| `apps/core/src/hooks/builtin/board-webhook.ts` (new) | Pure payload builders plus `registerBoardWebhook()`. |
+| `apps/core/src/hooks/builtin/board-webhook.test.ts` (new) | Tests for the pure builders and the decision mapping. |
+| `apps/core/src/hooks/bootstrap.ts` | Call `registerBoardWebhook()` in `initHooks`. |
+| `apps/core/src/agent/loop.ts:2440-2444` | Add `toolUseId: toolCall.id` to the hook context. |
 
 ---
 
@@ -3690,9 +3700,491 @@ git commit -m "docs: document agent activity tracking and the w overlay"
 
 ---
 
+## Phase 5: FreeCode
+
+### Task 23: FreeCode carries the tool-use id into hook context
+
+**Files (freecode repo):**
+- Modify: `apps/core/src/agent/loop.ts:2440-2444`
+- Modify: `apps/core/src/hooks/executors/command.ts` (env export, next to `CLAUDE_TOOL_NAME`)
+- Test: `apps/core/src/hooks/hook-payloads.test.ts`
+
+**Interfaces:**
+- Produces: `HookContext.toolUseId: string` present on `PreToolUse` and `PostToolUse` (the `HookContext` type already has an index signature, so no type change). Shell hooks also see `CLAUDE_TOOL_USE_ID`.
+
+- [ ] **Step 1: Write the failing test**
+
+Open `apps/core/src/hooks/hook-payloads.test.ts` and look at how it builds a context and asserts env for the command executor. Add:
+
+```ts
+test("command executor exports CLAUDE_TOOL_USE_ID when the context carries toolUseId", () => {
+  const env = buildHookEnv(
+    { toolName: "bash", toolInput: { command: "ls" } },
+    { sessionId: "s1", turnCount: 1, toolName: "bash", toolUseId: "call_42" },
+  );
+  assert.equal(env.CLAUDE_TOOL_USE_ID, "call_42");
+});
+```
+
+If `buildHookEnv` is not exported from `executors/command.ts`, extract the env-building block at lines 56-71 into an exported `buildHookEnv(input, context)` as part of this task.
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd /home/ayande/Project/freecode && pnpm --filter @freecode/core test -- --test-name-pattern "CLAUDE_TOOL_USE_ID"`
+Expected: FAIL, `undefined !== "call_42"`.
+
+- [ ] **Step 3: Write minimal implementation**
+
+`agent/loop.ts`:
+
+```ts
+    const hookContext: HookContext = {
+      sessionId: this.state.sessionId,
+      turnCount: this.state.turnCount,
+      toolName: toolCall.tool,
+      toolUseId: toolCall.id,
+    };
+```
+
+`executors/command.ts`, inside the env block:
+
+```ts
+  if (typeof context.toolUseId === "string") env.CLAUDE_TOOL_USE_ID = context.toolUseId;
+```
+
+- [ ] **Step 4: Run tests**
+
+Run: `cd /home/ayande/Project/freecode && pnpm --filter @freecode/core test 2>&1 | tail -5 && pnpm typecheck 2>&1 | tail -3`
+Expected: PASS, typecheck clean.
+
+- [ ] **Step 5: Commit (freecode repo)**
+
+```bash
+cd /home/ayande/Project/freecode
+git add apps/core/src/agent/loop.ts apps/core/src/hooks/executors/command.ts apps/core/src/hooks/hook-payloads.test.ts
+git commit -m "feat(hooks): carry toolUseId into hook context and CLAUDE_TOOL_USE_ID"
+```
+
+### Task 24: FreeCode board webhook, pure builders
+
+**Files (freecode repo):**
+- Create: `apps/core/src/hooks/builtin/board-webhook.ts`
+- Test: `apps/core/src/hooks/builtin/board-webhook.test.ts`
+
+**Interfaces:**
+- Produces:
+
+```ts
+export type BoardPayload = {
+  hook_event_name: "SessionStart" | "UserPromptSubmit" | "PreToolUse" | "PostToolUse" | "Stop" | "PermissionRequest" | "Notification";
+  session_id?: string;
+  tool_name?: string;
+  tool_use_id?: string;
+  tool_input?: Record<string, unknown>;
+  notification_type?: "agent_needs_input";
+};
+
+// Maps a FreeCode hook event to the Claude-shaped payload the board expects. Returns null for events the board ignores.
+export function hookEventToPayload(event: HookEventName, input: ToolCallInput, ctx: HookContext): BoardPayload | null;
+export function permissionToPayload(e: PermissionAskedEvent): BoardPayload;
+export function questionToPayload(e: QuestionAskedEvent): BoardPayload;
+// Maps the board's reply to a FreeCode answer. Returns null when the board did not decide.
+export function replyToAnswer(reply: unknown): PermissionAnswer | "reject" | null;
+export function registerBoardWebhook(): void;
+```
+
+- [ ] **Step 1: Write the failing test**
+
+```ts
+import test from "node:test";
+import assert from "node:assert/strict";
+import {
+  hookEventToPayload,
+  permissionToPayload,
+  questionToPayload,
+  replyToAnswer,
+} from "./board-webhook.js";
+
+const ctx = { sessionId: "s1", turnCount: 2, toolName: "bash", toolUseId: "call_1" };
+const input = { toolName: "bash", toolInput: { command: "ls" } };
+
+test("TurnStart is reported to the board as UserPromptSubmit", () => {
+  assert.deepEqual(hookEventToPayload("TurnStart", input, ctx), {
+    hook_event_name: "UserPromptSubmit",
+    session_id: "s1",
+  });
+});
+
+test("PreToolUse and PostToolUse carry tool name, id and input", () => {
+  for (const ev of ["PreToolUse", "PostToolUse"] as const) {
+    assert.deepEqual(hookEventToPayload(ev, input, ctx), {
+      hook_event_name: ev,
+      session_id: "s1",
+      tool_name: "bash",
+      tool_use_id: "call_1",
+      tool_input: { command: "ls" },
+    });
+  }
+});
+
+test("SessionStart and Stop map directly; TurnEnd and UserPromptSubmit are ignored", () => {
+  assert.equal(hookEventToPayload("SessionStart", input, ctx)?.hook_event_name, "SessionStart");
+  assert.equal(hookEventToPayload("Stop", input, ctx)?.hook_event_name, "Stop");
+  assert.equal(hookEventToPayload("TurnEnd", input, ctx), null);
+  assert.equal(hookEventToPayload("UserPromptSubmit", input, ctx), null);
+  assert.equal(hookEventToPayload("PreCompact", input, ctx), null);
+});
+
+test("permission.asked becomes PermissionRequest", () => {
+  assert.deepEqual(
+    permissionToPayload({
+      type: "permission.asked",
+      requestId: "r1",
+      sessionId: "s1",
+      toolName: "bash",
+      args: { command: "rm -rf build" },
+      description: "Run rm -rf build",
+    }),
+    {
+      hook_event_name: "PermissionRequest",
+      session_id: "s1",
+      tool_name: "bash",
+      tool_input: { command: "rm -rf build" },
+    },
+  );
+});
+
+test("question.asked becomes Notification agent_needs_input", () => {
+  assert.deepEqual(
+    questionToPayload({ type: "question.asked", requestId: "q1", sessionId: "s1", questions: [] }),
+    { hook_event_name: "Notification", session_id: "s1", notification_type: "agent_needs_input" },
+  );
+});
+
+test("replyToAnswer maps allow, deny, and silence", () => {
+  assert.deepEqual(replyToAnswer({ hookSpecificOutput: { decision: "allow" } }), { decision: "allow-once" });
+  assert.equal(replyToAnswer({ hookSpecificOutput: { decision: "deny" } }), "reject");
+  assert.equal(replyToAnswer({}), null);
+  assert.equal(replyToAnswer(undefined), null);
+  assert.equal(replyToAnswer({ hookSpecificOutput: { decision: "maybe" } }), null);
+});
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd /home/ayande/Project/freecode && pnpm --filter @freecode/core test -- --test-name-pattern "board"`
+Expected: module not found.
+
+- [ ] **Step 3: Write minimal implementation**
+
+```ts
+// =============================================================================
+// board-webhook — reports agent activity to AgentBoard over HTTP and lets the
+// board answer permission requests remotely. Inert unless FREECODE_HOOK_URL is
+// set. Payloads use the Claude Code hook JSON shape so the board needs no
+// FreeCode-specific mapper.
+// =============================================================================
+
+import { registerHook } from "../registry.js";
+import type { HookContext, HookEventName, HookResult, ToolCallInput } from "../types.js";
+import {
+  bus,
+  answerPermission,
+  rejectPermission,
+  type PermissionAnswer,
+  type PermissionAskedEvent,
+  type QuestionAskedEvent,
+} from "../../bus/index.js";
+
+export type BoardPayload = {
+  hook_event_name:
+    | "SessionStart"
+    | "UserPromptSubmit"
+    | "PreToolUse"
+    | "PostToolUse"
+    | "Stop"
+    | "PermissionRequest"
+    | "Notification";
+  session_id?: string;
+  tool_name?: string;
+  tool_use_id?: string;
+  tool_input?: Record<string, unknown>;
+  notification_type?: "agent_needs_input";
+};
+
+const FORWARDED: HookEventName[] = ["SessionStart", "TurnStart", "PreToolUse", "PostToolUse", "Stop"];
+const PERMISSION_WAIT_MS = 30 * 60 * 1000;
+const EVENT_TIMEOUT_MS = 2000;
+
+export function hookEventToPayload(
+  event: HookEventName,
+  input: ToolCallInput,
+  ctx: HookContext,
+): BoardPayload | null {
+  const session_id = ctx.sessionId;
+  switch (event) {
+    case "SessionStart":
+      return { hook_event_name: "SessionStart", session_id };
+    case "TurnStart":
+      return { hook_event_name: "UserPromptSubmit", session_id };
+    case "Stop":
+      return { hook_event_name: "Stop", session_id };
+    case "PreToolUse":
+    case "PostToolUse":
+      return {
+        hook_event_name: event,
+        session_id,
+        tool_name: input.toolName,
+        tool_use_id: typeof ctx.toolUseId === "string" ? ctx.toolUseId : undefined,
+        tool_input: input.toolInput,
+      };
+    default:
+      return null;
+  }
+}
+
+export function permissionToPayload(e: PermissionAskedEvent): BoardPayload {
+  return {
+    hook_event_name: "PermissionRequest",
+    session_id: e.sessionId,
+    tool_name: e.toolName,
+    tool_input: e.args,
+  };
+}
+
+export function questionToPayload(e: QuestionAskedEvent): BoardPayload {
+  return { hook_event_name: "Notification", session_id: e.sessionId, notification_type: "agent_needs_input" };
+}
+
+export function replyToAnswer(reply: unknown): PermissionAnswer | "reject" | null {
+  const decision = (reply as { hookSpecificOutput?: { decision?: unknown } } | undefined)?.hookSpecificOutput
+    ?.decision;
+  if (decision === "allow") return { decision: "allow-once" };
+  if (decision === "deny") return "reject";
+  return null;
+}
+
+function hookUrl(): string | undefined {
+  return process.env.FREECODE_HOOK_URL;
+}
+
+async function post(body: BoardPayload, timeoutMs: number): Promise<unknown> {
+  const url = hookUrl();
+  if (!url) return undefined;
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), timeoutMs);
+  try {
+    const res = await fetch(url, {
+      method: "POST",
+      headers: {
+        "content-type": "application/json",
+        "x-agentboard-launch": process.env.AGENTBOARD_LAUNCH_ID ?? "",
+      },
+      body: JSON.stringify(body),
+      signal: ac.signal,
+    });
+    if (!res.ok) return undefined;
+    return await res.json().catch(() => undefined);
+  } catch {
+    return undefined;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export function registerBoardWebhook(): void {
+  if (!hookUrl()) return;
+
+  for (const event of FORWARDED) {
+    registerHook(
+      event,
+      `board-webhook-${event}`,
+      {
+        type: "callback",
+        internal: true,
+        callback: async (input: ToolCallInput, ctx: HookContext): Promise<HookResult> => {
+          const payload = hookEventToPayload(event, input, ctx);
+          if (payload) void post(payload, EVENT_TIMEOUT_MS);
+          return { action: "continue" };
+        },
+      },
+      "settings",
+    );
+  }
+
+  bus.subscribe("permission.asked", (e) => {
+    void (async () => {
+      const answer = replyToAnswer(await post(permissionToPayload(e), PERMISSION_WAIT_MS));
+      if (answer === null) return;
+      if (answer === "reject") rejectPermission(e.requestId);
+      else answerPermission(e.requestId, answer);
+    })();
+  });
+
+  bus.subscribe("question.asked", (e) => {
+    void post(questionToPayload(e), EVENT_TIMEOUT_MS);
+  });
+}
+```
+
+Check the `bus.subscribe` signature in `apps/core/src/bus/index.ts` and adapt the callback typing if it takes `(type, handler)`.
+
+- [ ] **Step 4: Run tests**
+
+Run: `cd /home/ayande/Project/freecode && pnpm --filter @freecode/core test 2>&1 | tail -5 && pnpm typecheck 2>&1 | tail -3`
+Expected: PASS, typecheck clean.
+
+- [ ] **Step 5: Commit (freecode repo)**
+
+```bash
+cd /home/ayande/Project/freecode
+git add apps/core/src/hooks/builtin/board-webhook.ts apps/core/src/hooks/builtin/board-webhook.test.ts
+git commit -m "feat(hooks): board-webhook reports activity and accepts remote permission decisions"
+```
+
+### Task 25: Register the webhook at bootstrap
+
+**Files (freecode repo):**
+- Modify: `apps/core/src/hooks/bootstrap.ts`
+- Test: `apps/core/src/hooks/bootstrap.test.ts`
+
+- [ ] **Step 1: Write the failing test**
+
+Look at how `bootstrap.test.ts` inspects registered hooks (it likely uses `getHooksForEvent` or similar from `registry.ts`). Add:
+
+```ts
+test("initHooks registers board-webhook hooks when FREECODE_HOOK_URL is set", () => {
+  process.env.FREECODE_HOOK_URL = "http://127.0.0.1:1/hooks/SES-01";
+  try {
+    const mgr = initHooks(tmpProject());
+    mgr.dispose?.();
+    const names = getHooksForEvent("Stop").map((h) => h.name);
+    assert.ok(names.includes("board-webhook-Stop"), names.join(","));
+  } finally {
+    delete process.env.FREECODE_HOOK_URL;
+    unregisterAllHooks("settings");
+  }
+});
+
+test("initHooks registers no board-webhook hooks without FREECODE_HOOK_URL", () => {
+  delete process.env.FREECODE_HOOK_URL;
+  const mgr = initHooks(tmpProject());
+  mgr.dispose?.();
+  const names = getHooksForEvent("Stop").map((h) => h.name);
+  assert.ok(!names.some((n) => n.startsWith("board-webhook-")), names.join(","));
+  unregisterAllHooks("settings");
+});
+```
+
+Use the existing temp-project helper in that test file for `tmpProject()`.
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `cd /home/ayande/Project/freecode && pnpm --filter @freecode/core test -- --test-name-pattern "board-webhook"`
+Expected: FAIL, hook name absent.
+
+- [ ] **Step 3: Write minimal implementation**
+
+```ts
+import { registerBoardWebhook } from "./builtin/board-webhook.js";
+...
+  registerRtkHook();
+  registerBoardWebhook();
+```
+
+- [ ] **Step 4: Run tests**
+
+Run: `cd /home/ayande/Project/freecode && pnpm --filter @freecode/core test 2>&1 | tail -5`
+Expected: PASS.
+
+- [ ] **Step 5: Commit (freecode repo)**
+
+```bash
+cd /home/ayande/Project/freecode
+git add apps/core/src/hooks/bootstrap.ts apps/core/src/hooks/bootstrap.test.ts
+git commit -m "feat(hooks): register board-webhook at bootstrap"
+```
+
+### Task 26: Board exports FREECODE_HOOK_URL for freecode sessions
+
+**Files:**
+- Modify: `internal/orchestrator/service.go` (`launchEnv`)
+- Test: `internal/orchestrator/service_test.go`
+
+- [ ] **Step 1: Write the failing test**
+
+```go
+func TestStartAdHocRunFreecodeGetsHookURL(t *testing.T) {
+	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01"}}
+	fr := &capturingRunner{}
+	svc := NewService(fs, nil, nil, nil)
+	svc.SetAgentRunner(fr)
+	svc.SetActivity(&fakeActivity{}, "http://127.0.0.1:9")
+	sess, err := svc.StartAdHocRun(context.Background(), "AGT-01", "freecode", "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	env := strings.Join(fr.last.Env, "\n")
+	if !strings.Contains(env, "FREECODE_HOOK_URL=http://127.0.0.1:9/hooks/"+sess.ID) {
+		t.Fatalf("env = %v", fr.last.Env)
+	}
+	if len(fr.last.ExtraArgs) != 0 {
+		t.Fatalf("freecode should get no ExtraArgs, got %v", fr.last.ExtraArgs)
+	}
+}
+```
+
+- [ ] **Step 2: Run test to verify it fails**
+
+Run: `go test ./internal/orchestrator -run FreecodeGetsHookURL -v`
+Expected: FAIL, env missing.
+
+- [ ] **Step 3: Write minimal implementation**
+
+Change `launchEnv` to take the agent and session:
+
+```go
+func (s *Service) launchEnv(agent, sessionID, launchID string) []string {
+	env := []string{
+		"AGENTBOARD_SESSION_ID=" + sessionID,
+		"AGENTBOARD_LAUNCH_ID=" + launchID,
+	}
+	if s.hookBaseURL == "" {
+		return env
+	}
+	env = append(env, "AGENTBOARD_HOOK_URL="+s.hookBaseURL)
+	if agent == "freecode" {
+		env = append(env, "FREECODE_HOOK_URL="+s.hookBaseURL+"/hooks/"+sessionID)
+	}
+	return env
+}
+```
+
+Update the two call sites from Task 13 to `s.launchEnv(agent, session.ID, launchID)`.
+
+- [ ] **Step 4: Run tests**
+
+Run: `go test ./internal/orchestrator 2>&1 | tail -5 && go vet ./...`
+Expected: PASS.
+
+- [ ] **Step 5: Smoke test end to end**
+
+Build FreeCode (`cd /home/ayande/Project/freecode && pnpm build`) so the `freecode` binary on PATH includes the webhook. Run the board inside tmux, start a `freecode` ticket, ask it to run a shell command that needs approval, and confirm the card shows `!`, `notify-send` fires, and pressing `y` in the `w` overlay approves it in the pane.
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add internal/orchestrator/service.go internal/orchestrator/service_test.go
+git commit -m "feat(orchestrator): export FREECODE_HOOK_URL for freecode sessions"
+```
+
+Add one line to the CLAUDE.md section from Task 22: "FreeCode: enabled by `FREECODE_HOOK_URL`, which the board exports automatically; the webhook lives in FreeCode at `apps/core/src/hooks/builtin/board-webhook.ts`."
+
+---
+
 ## Self-review
 
-**Spec coverage.** Activity state and store columns: Tasks 5, 9. Launch generation: Tasks 10, 13. Hook receiver with held PermissionRequest: Task 11. Claude mapper table and tool-flight rule: Tasks 6, 7. Notifier entry-only policy with visibility: Tasks 12, 14. Resolve path and InputGuard: Tasks 17, 18. Reconciler and no_signal: Tasks 19 to 21. TUI glyph, header, overlay, jump: Tasks 16, 17. Spawn env and `--settings`: Task 13. Blocking bugs 1 to 4: Tasks 1 to 4. Not covered by design: OpenCode server mode, Cursor, Codex, WebSocket, notification click-to-focus (spec lists the last as an open question; body names the ticket instead).
+**Spec coverage.** Activity state and store columns: Tasks 5, 9. Launch generation: Tasks 10, 13. Hook receiver with held PermissionRequest: Task 11. Claude mapper table and tool-flight rule: Tasks 6, 7. Notifier entry-only policy with visibility: Tasks 12, 14. Resolve path and InputGuard: Tasks 17, 18. Reconciler and no_signal: Tasks 19 to 21. TUI glyph, header, overlay, jump: Tasks 16, 17. Spawn env and `--settings`: Task 13. Blocking bugs 1 to 4: Tasks 1 to 4. FreeCode section: Tasks 23 to 26. Not covered by design: OpenCode server mode, Cursor, Codex, WebSocket, notification click-to-focus (spec lists the last as an open question; body names the ticket instead).
 
 **Type consistency.** `RunHandle.Stop func()` (Task 2) is consumed in Task 3. `AgentRunner.Kill` (Task 3) is used by `StopSession`. `activity.Store` (Task 10) matches the store methods from Task 9. `Service.Hub()` is added in Task 16 and consumed there. `Info.EverSignalled` and `Since` (Task 10) are consumed by Tasks 20 and 21. `ActivityService()` is the single accessor name used in Tasks 14, 17, 18, 21. `fakeAgentRunner` (Task 3) is embedded by `capturingRunner` (Task 13).
 
