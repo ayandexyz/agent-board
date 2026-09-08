@@ -70,13 +70,13 @@ func (r *tmuxAgentRunner) Start(ctx context.Context, req RunRequest) (RunHandle,
 		return RunHandle{}, fmt.Errorf("send bin to pane: %w", err)
 	}
 
-	go r.injectPrompt(paneID, req.SessionID, cfg, promptFile)
+	go r.injectPrompt(ctx, paneID, req.SessionID, cfg, promptFile)
 
 	if req.Reporter != nil {
 		req.Reporter(fmt.Sprintf("Agent %s started in tmux pane %s", req.Agent, paneID))
 	}
 
-	go r.monitorPane(req.SessionID, paneID, cfg.Bin, req.OnComplete)
+	go r.monitorPane(ctx, req.SessionID, paneID, cfg.Bin, req.OnComplete)
 
 	return RunHandle{
 		Outcome: "running",
@@ -84,8 +84,8 @@ func (r *tmuxAgentRunner) Start(ctx context.Context, req RunRequest) (RunHandle,
 	}, nil
 }
 
-func (r *tmuxAgentRunner) injectPrompt(paneID, sessionID string, cfg *pty.Config, promptFile string) {
-	if err := waitForReady(paneID, cfg); err != nil {
+func (r *tmuxAgentRunner) injectPrompt(ctx context.Context, paneID, sessionID string, cfg *pty.Config, promptFile string) {
+	if err := waitForReady(ctx, paneID, cfg); err != nil {
 		return
 	}
 
@@ -96,6 +96,9 @@ func (r *tmuxAgentRunner) injectPrompt(paneID, sessionID string, cfg *pty.Config
 	prompt := string(promptBytes)
 
 	for _, c := range prompt {
+		if ctx.Err() != nil {
+			return
+		}
 		if c == '\n' {
 			if err := exec.Command("tmux", "send-keys", "-t", paneID, "-l", " ").Run(); err != nil {
 				return
@@ -110,7 +113,7 @@ func (r *tmuxAgentRunner) injectPrompt(paneID, sessionID string, cfg *pty.Config
 	exec.Command("tmux", "send-keys", "-t", paneID, "Enter").Run()
 }
 
-func waitForReady(paneID string, cfg *pty.Config) error {
+func waitForReady(ctx context.Context, paneID string, cfg *pty.Config) error {
 	timeout := cfg.ReadyWait
 	if timeout < 3*time.Second {
 		timeout = 3 * time.Second
@@ -118,6 +121,9 @@ func waitForReady(paneID string, cfg *pty.Config) error {
 	deadline := time.Now().Add(timeout)
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		output, err := exec.Command("tmux", "capture-pane", "-t", paneID, "-p", "-J", "-S", "-200").Output()
 		if err == nil {
 			stripped := pty.StripANSI(string(output))
@@ -132,7 +138,7 @@ func waitForReady(paneID string, cfg *pty.Config) error {
 	}
 }
 
-func (r *tmuxAgentRunner) monitorPane(sessionID string, paneID string, agentBin string, onComplete func(outcome, summary, resumeCommand string)) {
+func (r *tmuxAgentRunner) monitorPane(ctx context.Context, sessionID string, paneID string, agentBin string, onComplete func(outcome, summary, resumeCommand string)) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -140,7 +146,7 @@ func (r *tmuxAgentRunner) monitorPane(sessionID string, paneID string, agentBin 
 	sawAgentRunning := false
 	for {
 		select {
-		case <-context.Background().Done():
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			// Capture output continuously so we always have the latest content
