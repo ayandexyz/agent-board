@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ayan-de/agent-board/internal/activity"
 	"github.com/ayan-de/agent-board/internal/orchestrator"
 	"github.com/ayan-de/agent-board/internal/store"
 )
@@ -186,6 +187,50 @@ func TestStartAdHocRunFreecodeGetsHookURL(t *testing.T) {
 	want := "http://127.0.0.1:9999/hooks/" + sess.ID
 	if got, _ := envValue(cr.last.Env, "FREECODE_HOOK_URL"); got != want {
 		t.Errorf("FREECODE_HOOK_URL = %q, want %q", got, want)
+	}
+}
+
+func TestStartAdHocRunNonReportingAgentGetsNoSettings(t *testing.T) {
+	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01"}}
+	cr := &capturingRunner{}
+	svc := orchestrator.NewService(fs, nil, nil, nil)
+	svc.SetAgentRunner(cr)
+	svc.SetHookBaseURL("http://127.0.0.1:9999")
+
+	launched := false
+	svc.SetLaunchNotifier(func(string, string, activity.DecisionCodec) { launched = true })
+
+	if _, err := svc.StartAdHocRun(context.Background(), "AGT-01", "codex", "do it"); err != nil {
+		t.Fatalf("StartAdHocRun() error = %v", err)
+	}
+	// codex reports nothing, so the board must neither hand it a settings
+	// document nor start tracking a session that will never report.
+	if cr.last.Settings != "" {
+		t.Errorf("Settings = %q, want none", cr.last.Settings)
+	}
+	if launched {
+		t.Error("launch notifier fired for an agent that cannot report")
+	}
+}
+
+func TestStartAdHocRunNotifiesLaunchWithTheAgentsDecisionCodec(t *testing.T) {
+	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01"}}
+	cr := &capturingRunner{}
+	svc := orchestrator.NewService(fs, nil, nil, nil)
+	svc.SetAgentRunner(cr)
+	svc.SetHookBaseURL("http://127.0.0.1:9999")
+
+	var codec activity.DecisionCodec
+	svc.SetLaunchNotifier(func(_, _ string, c activity.DecisionCodec) { codec = c })
+
+	if _, err := svc.StartAdHocRun(context.Background(), "AGT-01", "freecode", "do it"); err != nil {
+		t.Fatalf("StartAdHocRun() error = %v", err)
+	}
+	if codec == nil {
+		t.Fatal("freecode launched with no decision codec")
+	}
+	if got := codec("allow"); got != "allow" {
+		t.Errorf("freecode codec produced %#v, want the bare string", got)
 	}
 }
 

@@ -26,7 +26,7 @@ func postRaw(t *testing.T, base, sessionID, body string) string {
 func TestPermissionHeldOpenUntilResolved(t *testing.T) {
 	r, base, _ := newRunning(t)
 	r.PermissionTimeout = 5 * time.Second
-	r.Launch("s1", "L1", "claude-code")
+	r.Launch("s1", "L1", NestedDecision)
 
 	replies := make(chan string, 1)
 	go func() {
@@ -67,11 +67,18 @@ func TestPermissionTimesOutWithNoDecision(t *testing.T) {
 }
 
 func TestPermissionReplyShapePerAgent(t *testing.T) {
-	if got := string(permissionReply("deny", true)); got != `{"hookSpecificOutput":{"decision":"deny","hookEventName":"PermissionRequest"}}` {
-		t.Fatalf("freecode reply = %s", got)
+	if got := string(permissionReply(BareDecision, "deny")); got != `{"hookSpecificOutput":{"decision":"deny","hookEventName":"PermissionRequest"}}` {
+		t.Fatalf("bare reply = %s", got)
 	}
-	if got := string(permissionReply("", false)); got != "{}" {
+	if got := string(permissionReply(NestedDecision, "allow")); got != `{"hookSpecificOutput":{"decision":{"behavior":"allow"},"hookEventName":"PermissionRequest"}}` {
+		t.Fatalf("nested reply = %s", got)
+	}
+	if got := string(permissionReply(NestedDecision, "")); got != "{}" {
 		t.Fatalf("empty decision = %s, want {}", got)
+	}
+	// An agent that cannot be answered over the wire gets no decision at all.
+	if got := string(permissionReply(nil, "allow")); got != "{}" {
+		t.Fatalf("codecless reply = %s, want {}", got)
 	}
 }
 

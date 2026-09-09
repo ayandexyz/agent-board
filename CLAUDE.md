@@ -70,6 +70,10 @@ agent-board/
 │   │   ├── decomposer.go   # Project → tickets decomposition engine
 │   │   ├── assigner.go     # Auto-assign tickets to agents with reasoning
 │   │   └── prompts.go      # Prompt templates for decomposition and assignment
+│   ├── agents/             # Catalog of coding agents — one file per agent
+│   │   ├── agents.go       # Capability, Descriptor, Register/Lookup registry
+│   │   ├── catalog.go      # The list of agents that exist, in picker order
+│   │   └── claude.go …     # One descriptor per agent (opencode, freecode, …)
 │   ├── apitypes/           # Shared API types (DTOs)
 │   │   ├── ticket.go       # Ticket DTOs
 │   │   ├── session.go      # Session DTOs
@@ -247,7 +251,22 @@ Spawned agents report their own state over HTTP rather than the board guessing f
 
 `internal/activity` is the receiver: a loopback `net/http` server on `127.0.0.1:0`, started in `runTUI` and handed to the orchestrator via `SetHookBaseURL`. It accepts `POST /hooks/{sessionID}` carrying Claude-Code-shaped hook JSON, maps it to a state (`active`, `idle`, `waiting_input`, `blocked`, `exited`), and fires one `notify-send` on entry into the needs-input family. The alert body is `toolDetail` in `internal/activity/detail.go`: the question for `AskUserQuestion`, the command for `Bash`, the path for a file edit, and the bare tool name for anything unlisted — never a dump of `tool_input`. A permission request naming `AskUserQuestion` is `waiting_input`, not `blocked`; what is waiting is an answer, not an approval. `X-Agentboard-Launch` is checked against the launch id recorded at spawn, so a relaunched session's late hooks are dropped.
 
-`PermissionRequest` is held open (10 minutes by default, `Receiver.PermissionTimeout`) while the board asks: the alert is flagged `Decidable`, the TUI raises an approval modal instead of a toast, and `Receiver.Resolve(sessionID, decision)` writes the reply — nested `{"behavior":...}` for Claude Code, a bare string for FreeCode, chosen from the agent recorded at `Launch`. Cancelling the modal denies; a timeout answers `{}` and the pane picker takes over.
+`PermissionRequest` is held open (10 minutes by default, `Receiver.PermissionTimeout`) while the board asks: the alert is flagged `Decidable`, the TUI raises an approval modal instead of a toast, and `Receiver.Resolve(sessionID, decision)` writes the reply — nested `{"behavior":...}` for Claude Code and OpenCode, a bare string for FreeCode, through the `activity.DecisionCodec` recorded at `Launch`. Cancelling the modal denies; a timeout answers `{}` and the pane picker takes over. The receiver never names an agent: a nil codec simply means nobody can be answered over the wire.
+
+### The agent catalog
+
+`internal/agents` is the one place that knows one agent from another. Each agent is a `Descriptor` in its own file — name, binary, whether it is offered in the picker, its logo and colour, its resume pattern, the capabilities the board may exercise, its `activity.DecisionCodec`, and a `Provision` func that wires one spawn up to the receiver. `catalog.go` lists them in the order they are offered; `Register` panics at startup on a contradictory descriptor (claiming remote permissions with no codec, provisioning reporting it never claimed) rather than failing silently at the moment a user is waiting on a modal.
+
+Adding an agent is adding one file and one line in `catalog.go`. `config.DetectAgents`, `orchestrator.ExtractResumeCommand` and `Service.launchSpec` all read the catalog, so none of them grows a case.
+
+Capabilities are added only when something branches on them. Today:
+
+| Capability | What branches on it |
+|---|---|
+| `activity.reports` | `launchSpec` provisions and notifies the receiver only for agents that report |
+| `permission.remote` | must agree with the presence of a decision codec; enforced at `Register` |
+
+Deliberately not yet declared, because nothing reads them: `lifecycle.session_end` (OpenCode reports no exit, so only the pane monitor notices) and `tool.flight_ids` (no `tool_use_id` means any `PostToolUse` clears a permission block, not just the one that raised it).
 
 Not built yet: the store migration, the event hub, the tool-flight rule beyond "any PostToolUse clears the block", the TUI glyph/waiting overlay, and the capture-pane reconciler.
 
@@ -280,7 +299,8 @@ two agents disagree on the reply shape: Claude Code wants
 `decision: "allow"`. `PermissionRequest` from Claude Code carries no
 `tool_use_id`.
 
-The document reaches the pane through `RunRequest.Settings`; `launchArgs` in
+The document reaches the pane through `RunRequest.Settings`, built by the
+agent's `Provision` in `internal/agents/claude.go`; `launchArgs` in
 `internal/orchestrator/pty_runner.go` caches it and `agentCommand` quotes the
 path into the launch line.
 

@@ -48,9 +48,9 @@ type Receiver struct {
 	mu       sync.Mutex
 	sessions map[string]*Session
 	launches map[string]string
-	// bare marks sessions whose agent reads a bare-string permission decision.
-	bare    map[string]bool
-	pending map[string]*pending
+	// decisions records how each session's agent reads a permission decision.
+	decisions map[string]DecisionCodec
+	pending   map[string]*pending
 
 	ln  net.Listener
 	srv *http.Server
@@ -62,7 +62,7 @@ func New() *Receiver {
 		PermissionTimeout: 10 * time.Minute,
 		sessions:          make(map[string]*Session),
 		launches:          make(map[string]string),
-		bare:              make(map[string]bool),
+		decisions:         make(map[string]DecisionCodec),
 		pending:           make(map[string]*pending),
 		events:            make(chan Alert, 16),
 	}
@@ -90,14 +90,15 @@ func (r *Receiver) Close() error {
 	return r.srv.Close()
 }
 
-// Launch records the generation id for a session. Hooks carrying a different
-// one belong to an earlier launch and are dropped.
-// The agent name decides which shape its permission decision is written in.
-func (r *Receiver) Launch(sessionID, launchID, agent string) {
+// Launch records the generation id for a session, along with how its agent
+// reads a permission decision. Hooks carrying a different launch id belong to
+// an earlier launch and are dropped. A nil codec means the agent cannot be
+// answered over the wire, and its requests fall through to its own pane picker.
+func (r *Receiver) Launch(sessionID, launchID string, decisions DecisionCodec) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.launches[sessionID] = launchID
-	r.bare[sessionID] = agent == "freecode"
+	r.decisions[sessionID] = decisions
 	delete(r.sessions, sessionID)
 }
 
@@ -108,7 +109,7 @@ func (r *Receiver) Forget(sessionID string) {
 	defer r.mu.Unlock()
 	delete(r.sessions, sessionID)
 	delete(r.launches, sessionID)
-	delete(r.bare, sessionID)
+	delete(r.decisions, sessionID)
 }
 
 // StateOf returns the tracked state, or "" if the session has never reported.
@@ -174,9 +175,9 @@ func (r *Receiver) servePermission(w http.ResponseWriter, req *http.Request, ses
 	}
 
 	r.mu.Lock()
-	bare := r.bare[sessionID]
+	codec := r.decisions[sessionID]
 	r.mu.Unlock()
-	_, _ = w.Write(permissionReply(decision, bare))
+	_, _ = w.Write(permissionReply(codec, decision))
 }
 
 // apply records a signal and reports whether it was accepted.

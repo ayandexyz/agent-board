@@ -9,6 +9,20 @@ type pending struct {
 	decision chan string
 }
 
+// DecisionCodec renders a permission decision in the reply shape its agent
+// reads. Agents disagree here — Claude Code wants the decision nested under a
+// behavior key, FreeCode wants a bare string — so the shape travels with the
+// launch rather than being switched on an agent name in here.
+type DecisionCodec func(decision string) any
+
+// NestedDecision is Claude Code's shape: {"decision":{"behavior":"allow"}}.
+func NestedDecision(decision string) any {
+	return claudeDecision{Behavior: decision}
+}
+
+// BareDecision is FreeCode's shape: {"decision":"allow"}.
+func BareDecision(decision string) any { return decision }
+
 // Resolve answers a session's held permission request. decision is "allow",
 // "deny", or "" to hand the choice back to the agent's own pane picker. It
 // reports whether a request was actually waiting.
@@ -47,21 +61,17 @@ type claudeDecision struct {
 	Behavior string `json:"behavior"`
 }
 
-// permissionReply renders the decision in the shape the answering agent reads.
-// Claude Code wants it nested under a behavior key; FreeCode wants a bare
-// string. An empty decision is no decision at all: the agent falls through to
-// its own picker in the pane.
-func permissionReply(decision string, bare bool) []byte {
-	if decision == "" {
+// permissionReply renders the decision through the launching agent's codec. An
+// empty decision, or an agent that declared no codec, is no decision at all:
+// the agent falls through to its own picker in the pane.
+func permissionReply(codec DecisionCodec, decision string) []byte {
+	if decision == "" || codec == nil {
 		return []byte("{}")
 	}
-	out := map[string]any{"hookEventName": "PermissionRequest"}
-	if bare {
-		out["decision"] = decision
-	} else {
-		out["decision"] = claudeDecision{Behavior: decision}
-	}
-	raw, err := json.Marshal(map[string]any{"hookSpecificOutput": out})
+	raw, err := json.Marshal(map[string]any{"hookSpecificOutput": map[string]any{
+		"hookEventName": "PermissionRequest",
+		"decision":      codec(decision),
+	}})
 	if err != nil {
 		return []byte("{}")
 	}

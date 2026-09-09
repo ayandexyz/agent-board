@@ -100,7 +100,7 @@ func TestNotifiesOnceOnEntry(t *testing.T) {
 
 func TestDropsStaleLaunch(t *testing.T) {
 	r, base, _ := newRunning(t)
-	r.Launch("s1", "L2", "claude-code")
+	r.Launch("s1", "L2", NestedDecision)
 
 	post(t, base, "s1", "L1", `{"hook_event_name":"PermissionRequest"}`)
 	if got := r.StateOf("s1"); got != "" {

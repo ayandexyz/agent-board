@@ -128,7 +128,7 @@ func TestOpenCodePluginQuestionReachesTheBoard(t *testing.T) {
 		t.Fatalf("Start() error = %v", err)
 	}
 	defer r.Close()
-	r.Launch("SES-Q", "L9", "opencode")
+	r.Launch("SES-Q", "L9", NestedDecision)
 
 	const event = `{"type":"question.asked","properties":{"id":"que_1","sessionID":"ses_1",` +
 		`"questions":[{"question":"Which capital city is on two continents?","header":"Quiz","options":[]}]}}`
