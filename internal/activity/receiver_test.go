@@ -145,11 +145,12 @@ func TestUnknownEventIgnored(t *testing.T) {
 func TestEventsCarryAlert(t *testing.T) {
 	r, base, _ := newRunning(t)
 	r.Label = func(string) string { return "agent-1a2b3c4d" }
+	alerts, _ := r.Subscribe()
 
 	post(t, base, "s1", "", `{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"rm -rf build"}}`)
 
 	select {
-	case a := <-r.Events():
+	case a := <-alerts:
 		if a.SessionID != "s1" || a.State != StateBlocked {
 			t.Fatalf("alert = %+v", a)
 		}
@@ -166,10 +167,11 @@ func TestEventsCarryAlert(t *testing.T) {
 
 func TestEventsDroppedRatherThanBlocking(t *testing.T) {
 	r, base, _ := newRunning(t)
+	alerts, _ := r.Subscribe()
 	for i := 0; i < 40; i++ {
 		post(t, base, fmt.Sprintf("s%d", i), "", `{"hook_event_name":"PermissionRequest"}`)
 	}
-	if got := len(r.Events()); got != cap(r.events) {
-		t.Fatalf("buffered %d alerts, want the channel capped at %d", got, cap(r.events))
+	if got := len(alerts); got != eventBuffer {
+		t.Fatalf("buffered %d alerts, want the subscription capped at %d", got, eventBuffer)
 	}
 }

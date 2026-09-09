@@ -268,7 +268,11 @@ Capabilities are added only when something branches on them. Today:
 
 Deliberately not yet declared, because nothing reads them: `lifecycle.session_end` (OpenCode reports no exit, so only the pane monitor notices) and `tool.flight_ids` (no `tool_use_id` means any `PostToolUse` clears a permission block, not just the one that raised it).
 
-Not built yet: the store migration, the event hub, the tool-flight rule beyond "any PostToolUse clears the block", the TUI glyph/waiting overlay, and the capture-pane reconciler.
+### The alert hub
+
+`Receiver.Subscribe()` returns a stream of alerts and a cancel func. Every subscriber gets its own `eventBuffer`-deep channel and sees every alert raised after it subscribed, so the TUI, an API websocket and a push bridge never take alerts from one another — which a single shared channel did. Sends are non-blocking and drop on overflow: a missed toast costs a notification, a blocked hook stalls the agent. Cancel closes the stream (idempotent), and `Receiver.Close` ends every subscription so readers unblock.
+
+Not built yet: the store migration, the tool-flight rule beyond "any PostToolUse clears the block", the TUI glyph/waiting overlay, and the capture-pane reconciler.
 
 Every agent pane is launched with its session identity exported via `tmux new-window -e`:
 

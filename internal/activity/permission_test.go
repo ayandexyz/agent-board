@@ -85,12 +85,13 @@ func TestPermissionReplyShapePerAgent(t *testing.T) {
 func TestPermissionAlertIsDecidable(t *testing.T) {
 	r, base, _ := newRunning(t)
 	r.PermissionTimeout = 200 * time.Millisecond
+	alerts, _ := r.Subscribe()
 	done := make(chan string, 1)
 	go func() { done <- postRaw(t, base, "s1", `{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"ls"}}`) }()
 	defer func() { <-done }()
 
 	select {
-	case a := <-r.Events():
+	case a := <-alerts:
 		if !a.Decidable {
 			t.Fatal("permission alert not marked decidable")
 		}

@@ -37,9 +37,6 @@ type Receiver struct {
 	// Label turns a session id into something a human recognises, usually the
 	// tmux window it runs in. Defaults to the session id.
 	Label func(sessionID string) string
-	// events carries needs-input entries to the TUI. Buffered and dropped on
-	// overflow: a stalled reader must never block a hook request.
-	events chan Alert
 	// PermissionTimeout bounds how long a permission hook is held open waiting
 	// for a human. On expiry the agent gets no decision and falls back to its
 	// own pane picker.
@@ -51,6 +48,9 @@ type Receiver struct {
 	// decisions records how each session's agent reads a permission decision.
 	decisions map[string]DecisionCodec
 	pending   map[string]*pending
+	// subs are the consumers of the alert stream. Each has its own buffer, so
+	// the TUI and a remote client never take alerts from one another.
+	subs map[*subscription]struct{}
 
 	ln  net.Listener
 	srv *http.Server
@@ -64,7 +64,7 @@ func New() *Receiver {
 		launches:          make(map[string]string),
 		decisions:         make(map[string]DecisionCodec),
 		pending:           make(map[string]*pending),
-		events:            make(chan Alert, 16),
+		subs:              make(map[*subscription]struct{}),
 	}
 }
 
@@ -84,6 +84,7 @@ func (r *Receiver) Start() (string, error) {
 }
 
 func (r *Receiver) Close() error {
+	r.closeSubscriptions()
 	if r.srv == nil {
 		return nil
 	}
@@ -220,16 +221,9 @@ func (r *Receiver) apply(sessionID, launchID string, p payload) bool {
 	if r.Notify != nil {
 		r.Notify(title, body)
 	}
-	select {
-	case r.events <- Alert{SessionID: s.ID, State: s.State, Title: title, Body: body, Decidable: decidable}:
-	default:
-	}
+	r.publish(Alert{SessionID: s.ID, State: s.State, Title: title, Body: body, Decidable: decidable})
 	return true
 }
-
-// Events yields a session each time it starts needing a human. Consumed by the
-// TUI to raise an in-app notification alongside the desktop one.
-func (r *Receiver) Events() <-chan Alert { return r.events }
 
 // alertText must be called with the lock held.
 func (r *Receiver) alertText(s Session) (string, string) {
