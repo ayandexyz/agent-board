@@ -154,6 +154,10 @@ type AppDeps struct {
 	// ActivityEvents delivers "agent needs you" alerts from the hook receiver.
 	// Nil when no receiver is running.
 	ActivityEvents <-chan activity.Alert
+	// ResolvePermission answers a held permission request: "allow", "deny", or
+	// "" to leave the choice to the agent's own picker in the pane. Nil when no
+	// receiver is running.
+	ResolvePermission func(sessionID, decision string)
 	// CurrentBranch is the branch the repository is checked out on, shown as
 	// the "current branch" choice on a ticket. Empty outside a git repo.
 	CurrentBranch string
@@ -176,9 +180,11 @@ type App struct {
 	textInput    TextInputModal
 	notification NotificationStack
 
-	activityEvents <-chan activity.Alert
-	quit           bool
-	runCommand     tea.Cmd
+	activityEvents    <-chan activity.Alert
+	resolvePermission func(sessionID, decision string)
+
+	quit       bool
+	runCommand tea.Cmd
 
 	kanban       KanbanModel
 	ticketView   TicketViewModel
@@ -218,6 +224,7 @@ func NewApp(cfg *config.Config, s *store.Store, reg *theme.Registry, deps AppDep
 		store:               s,
 		orchestrator:        deps.Orchestrator,
 		activityEvents:      deps.ActivityEvents,
+		resolvePermission:   deps.ResolvePermission,
 		resolver:            resolver,
 		config:              cfg,
 		registry:            reg,
@@ -262,6 +269,23 @@ func (a *App) applyTheme() {
 	a.mergeModal.SetTheme(t)
 	a.textInput.SetTheme(t)
 	a.notification.SetTheme(t)
+}
+
+// openPermissionModal asks the user to approve the tool call an agent is
+// blocked on. Cancelling denies: a permission dialog left unanswered stalls the
+// agent for the whole hook timeout, so the modal fails closed.
+func (a *App) openPermissionModal(alert activity.Alert) {
+	sessionID := alert.SessionID
+	resolve := a.resolvePermission
+	a.modal.Open(
+		alert.Title,
+		alert.Body,
+		func() tea.Cmd {
+			resolve(sessionID, "allow")
+			return nil
+		},
+		func() { resolve(sessionID, "deny") },
+	)
 }
 
 // activityNotificationDuration is how long an "agent needs you" card stays up.
@@ -458,9 +482,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.State == activity.StateBlocked {
 			variant = NotificationError
 		}
+		next := a.waitForActivityCmd()
+		if msg.Decidable && a.resolvePermission != nil && !a.modal.Active() {
+			a.openPermissionModal(msg)
+			return a, next
+		}
 		return a, tea.Batch(
 			a.notification.Show(msg.Title, msg.Body, variant, activityNotificationDuration),
-			a.waitForActivityCmd(),
+			next,
 		)
 
 	case notificationMsg:

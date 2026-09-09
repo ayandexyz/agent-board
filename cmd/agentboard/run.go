@@ -81,6 +81,7 @@ func runTUI() int {
 		orch.SetAgentRunner(agentRunner)
 	}
 
+	var resolvePermission func(sessionID, decision string)
 	recv := activity.New()
 	recv.Label = orch.WindowForSession
 	if base, err := recv.Start(); err != nil {
@@ -89,6 +90,7 @@ func runTUI() int {
 		defer recv.Close()
 		orch.SetHookBaseURL(base)
 		orch.SetLaunchNotifier(recv.Launch)
+		resolvePermission = func(sessionID, decision string) { recv.Resolve(sessionID, decision) }
 	}
 
 	g := git.New(git.ExecRunner())
@@ -120,9 +122,10 @@ func runTUI() int {
 	}
 
 	app, err := tui.NewApp(cfg, s, reg, tui.AppDeps{
-		Orchestrator:   orch,
-		ActivityEvents: recv.Events(),
-		CurrentBranch:  currentBranch,
+		Orchestrator:      orch,
+		ActivityEvents:    recv.Events(),
+		ResolvePermission: resolvePermission,
+		CurrentBranch:     currentBranch,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error creating app: %v\n", err)

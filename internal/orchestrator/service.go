@@ -29,7 +29,7 @@ type Service struct {
 	activeSessions map[string]*AgentSession
 	completionCh   chan RunCompletion
 	hookBaseURL    string
-	onLaunch       func(sessionID, launchID string)
+	onLaunch       func(sessionID, launchID, agent string)
 }
 
 // AgentSession tracks an active agent session
@@ -69,7 +69,7 @@ func (s *Service) SetHookBaseURL(url string) {
 
 // SetLaunchNotifier is told the launch id of every spawn that gets hook
 // environment, so the receiver can drop reports from an earlier launch.
-func (s *Service) SetLaunchNotifier(f func(sessionID, launchID string)) {
+func (s *Service) SetLaunchNotifier(f func(sessionID, launchID, agent string)) {
 	s.onLaunch = f
 }
 
@@ -85,7 +85,7 @@ func (s *Service) launchSpec(agent, sessionID, launchID string) ([]string, strin
 		return env, ""
 	}
 	if s.onLaunch != nil {
-		s.onLaunch(sessionID, launchID)
+		s.onLaunch(sessionID, launchID, agent)
 	}
 	hookURL := s.hookBaseURL + "/hooks/" + sessionID
 	env = append(env, "AGENTBOARD_HOOK_URL="+s.hookBaseURL)

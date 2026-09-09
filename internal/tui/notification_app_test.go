@@ -228,3 +228,47 @@ func flatten(msg tea.Msg) []tea.Msg {
 	}
 	return msgs
 }
+
+func TestDecidablePermissionAlertOpensModal(t *testing.T) {
+	app, _ := newTestApp(t)
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+
+	got := make(chan [2]string, 2)
+	app.resolvePermission = func(sessionID, decision string) { got <- [2]string{sessionID, decision} }
+
+	app.Update(activity.Alert{
+		SessionID: "SES-1",
+		State:     activity.StateBlocked,
+		Title:     "agent-1 needs approval",
+		Body:      "Bash: rm -rf build",
+		Decidable: true,
+	})
+	if !app.modal.Active() {
+		t.Fatal("decidable alert should open the approval modal")
+	}
+
+	app.Update(tea.KeyMsg{Type: tea.KeyLeft})
+	app.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	select {
+	case answer := <-got:
+		if answer != [2]string{"SES-1", "allow"} {
+			t.Fatalf("resolved with %v, want SES-1 allow", answer)
+		}
+	default:
+		t.Fatal("confirming the modal did not resolve the request")
+	}
+}
+
+func TestUndecidableAlertStaysAToast(t *testing.T) {
+	app, _ := newTestApp(t)
+	app.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
+	app.resolvePermission = func(string, string) { t.Fatal("must not resolve an undecidable alert") }
+
+	app.Update(activity.Alert{SessionID: "SES-2", State: activity.StateWaitingInput, Title: "x", Body: "y"})
+	if app.modal.Active() {
+		t.Fatal("alert with no held request should not open a modal")
+	}
+	if !app.notification.Active() {
+		t.Fatal("undecidable alert should still raise a toast")
+	}
+}

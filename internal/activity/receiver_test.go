@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"strings"
 	"testing"
+	"time"
 )
 
 func post(t *testing.T, base, session, launch, body string) {
@@ -28,6 +29,7 @@ func newRunning(t *testing.T) (*Receiver, string, chan [2]string) {
 	t.Helper()
 	alerts := make(chan [2]string, 64)
 	r := New()
+	r.PermissionTimeout = 50 * time.Millisecond
 	r.Notify = func(title, body string) {
 		select {
 		case alerts <- [2]string{title, body}:
@@ -98,7 +100,7 @@ func TestNotifiesOnceOnEntry(t *testing.T) {
 
 func TestDropsStaleLaunch(t *testing.T) {
 	r, base, _ := newRunning(t)
-	r.Launch("s1", "L2")
+	r.Launch("s1", "L2", "claude-code")
 
 	post(t, base, "s1", "L1", `{"hook_event_name":"PermissionRequest"}`)
 	if got := r.StateOf("s1"); got != "" {
