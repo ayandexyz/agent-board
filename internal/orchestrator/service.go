@@ -100,6 +100,13 @@ func (s *Service) launchSpec(agent, sessionID, launchID string) ([]string, strin
 	// ticket worktree and no earlier launch's settings can linger.
 	case "claude-code", "claudecode":
 		settings = activity.ClaudeSettingsJSON(hookURL)
+	// OpenCode has no settings flag; it loads the board's reporting plugin
+	// through a config document named by OPENCODE_CONFIG, which it merges with
+	// the user's own rather than replacing it.
+	case "opencode":
+		if path, err := activity.OpenCodeConfig(cacheDir()); err == nil {
+			env = append(env, "OPENCODE_CONFIG="+path)
+		}
 	}
 	return env, settings
 }

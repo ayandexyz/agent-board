@@ -34,6 +34,15 @@ func newWindowArgs(sessionName, windowName, workDir string, env []string) []stri
 	return args
 }
 
+// cacheDir is where the board keeps the scratch files it hands to agents:
+// prompts, settings documents, the OpenCode plugin. Created on demand.
+func cacheDir() string {
+	homeDir, _ := os.UserHomeDir()
+	dir := fmt.Sprintf("%s/.agentboard/cache", homeDir)
+	_ = os.MkdirAll(dir, 0755)
+	return dir
+}
+
 // launchArgs caches an agent's settings document and returns the arguments that
 // point the agent at it. The document is a kilobyte of JSON; typed into the
 // pane it would bury the launch line in the user's scrollback.
@@ -87,15 +96,13 @@ func (r *tmuxAgentRunner) Start(ctx context.Context, req RunRequest) (RunHandle,
 		formattedPrompt = cfg.FormatPrompt(req.Prompt)
 	}
 
-	homeDir, _ := os.UserHomeDir()
-	cacheDir := fmt.Sprintf("%s/.agentboard/cache", homeDir)
-	_ = os.MkdirAll(cacheDir, 0755)
-	promptFile := fmt.Sprintf("%s/prompt-%s.txt", cacheDir, req.SessionID)
+	cache := cacheDir()
+	promptFile := fmt.Sprintf("%s/prompt-%s.txt", cache, req.SessionID)
 	if err := os.WriteFile(promptFile, []byte(formattedPrompt), 0644); err != nil {
 		return RunHandle{}, fmt.Errorf("write prompt file: %w", err)
 	}
 
-	args, err := launchArgs(cacheDir, req.SessionID, req.Settings)
+	args, err := launchArgs(cache, req.SessionID, req.Settings)
 	if err != nil {
 		return RunHandle{}, err
 	}

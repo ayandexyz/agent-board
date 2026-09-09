@@ -2,6 +2,7 @@ package orchestrator_test
 
 import (
 	"context"
+	"os"
 	"strings"
 	"testing"
 
@@ -254,5 +255,44 @@ func TestStartAdHocRunLeavesOtherAgentsUnflagged(t *testing.T) {
 	}
 	if cr.last.Settings != "" {
 		t.Errorf("Settings = %s, want none for a non-claude agent", cr.last.Settings)
+	}
+}
+
+func TestStartAdHocRunOpencodeGetsPluginConfig(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01"}}
+	cr := &capturingRunner{}
+	svc := orchestrator.NewService(fs, nil, nil, nil)
+	svc.SetAgentRunner(cr)
+	svc.SetHookBaseURL("http://127.0.0.1:9999")
+
+	if _, err := svc.StartAdHocRun(context.Background(), "AGT-01", "opencode", "do it"); err != nil {
+		t.Fatalf("StartAdHocRun() error = %v", err)
+	}
+	got, ok := envValue(cr.last.Env, "OPENCODE_CONFIG")
+	if !ok {
+		t.Fatal("OPENCODE_CONFIG not exported for opencode")
+	}
+	if _, err := os.Stat(got); err != nil {
+		t.Errorf("OPENCODE_CONFIG points at %s, which does not exist: %v", got, err)
+	}
+	if cr.last.Settings != "" {
+		t.Errorf("Settings = %s, want none for opencode", cr.last.Settings)
+	}
+}
+
+func TestStartAdHocRunOpencodeWithoutHookURLExportsNoConfig(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01"}}
+	cr := &capturingRunner{}
+	svc := orchestrator.NewService(fs, nil, nil, nil)
+	svc.SetAgentRunner(cr)
+
+	if _, err := svc.StartAdHocRun(context.Background(), "AGT-01", "opencode", "do it"); err != nil {
+		t.Fatalf("StartAdHocRun() error = %v", err)
+	}
+	if _, ok := envValue(cr.last.Env, "OPENCODE_CONFIG"); ok {
+		t.Error("OPENCODE_CONFIG exported with no hook receiver configured")
 	}
 }

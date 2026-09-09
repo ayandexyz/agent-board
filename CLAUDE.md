@@ -239,7 +239,9 @@ When viewing dashboard with active sessions ([app.go:474-502](internal/tui/app.g
 
 ---
 
-## Agent Activity Tracking (in progress)
+## Agent Activity Tracking
+
+Implemented for Claude Code, FreeCode and OpenCode.
 
 Spawned agents report their own state over HTTP rather than the board guessing from the screen.
 
@@ -257,6 +259,7 @@ Every agent pane is launched with its session identity exported via `tmux new-wi
 | `AGENTBOARD_LAUNCH_ID` | Per-spawn id; lets the board drop hooks from an earlier launch of the same session |
 | `AGENTBOARD_HOOK_URL` | Base URL of the board's local hook receiver |
 | `FREECODE_HOOK_URL` | FreeCode only: `<base>/hooks/<sessionID>` |
+| `OPENCODE_CONFIG` | OpenCode only: path to the config document that loads the board's reporting plugin |
 
 Claude Code takes no environment variable of its own. It is launched as
 `claude --settings ~/.agentboard/cache/settings-<sessionID>.json`, whose
@@ -282,6 +285,25 @@ The document reaches the pane through `RunRequest.Settings`; `launchArgs` in
 path into the launch line.
 
 Nothing is exported unless `Service.SetHookBaseURL` was called, so an agent is never told to reach a receiver that is not running.
+
+OpenCode has no settings flag of its own, so the board ships the reporter as an
+OpenCode plugin: `internal/activity/opencode_plugin.mjs`, embedded in the binary
+and written by `activity.OpenCodeConfig` to
+`~/.agentboard/cache/opencode-plugin.mjs` alongside a one-key config document
+(`plugin: ["file://<that path>"]`) named by `OPENCODE_CONFIG`. OpenCode merges
+plugin lists across config sources, so the user's own plugins survive. Neither
+file is per session — the plugin reads `AGENTBOARD_SESSION_ID`,
+`AGENTBOARD_LAUNCH_ID` and `AGENTBOARD_HOOK_URL` from its pane and stays inert
+without them.
+
+The plugin posts Claude-Code-shaped payloads, so there is no OpenCode mapper in
+Go: `chat.message` as `UserPromptSubmit`, `tool.execute.before`/`after` as
+`PreToolUse`/`PostToolUse` (`tool_use_id` = OpenCode's `callID`), `session.idle`
+as `Stop`, and `permission.asked` as a `PermissionRequest` it awaits. `allow`
+replies become `POST /session/{id}/permissions/{permissionID}` with `once`,
+`deny` becomes `reject`, and no decision leaves the pane picker to the user. It
+reads either decision shape, nested or bare. OpenCode emits no session-end
+event, so process exit is still detected by the pane monitor.
 
 FreeCode support lives in the FreeCode repo at `apps/core/src/hooks/builtin/board-webhook.ts`, registered from `initHooks`. It posts Claude Code shaped hook payloads (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`) so the board needs no FreeCode-specific mapper, and it answers permission requests remotely: a reply of `{"hookSpecificOutput":{"decision":"allow"}}` resolves the agent's pending prompt as a one-shot grant, `deny` rejects it, and no decision leaves the choice to the pane picker.
 
@@ -414,6 +436,7 @@ Backlog -> In Progress            -> Review              -> Done
 | `AGENTBOARD_LAUNCH_ID` | set by board | Exported into each agent pane; per-spawn generation id |
 | `AGENTBOARD_HOOK_URL` | set by board | Exported into each agent pane; base URL of the hook receiver |
 | `FREECODE_HOOK_URL` | set by board | Exported for freecode agents; per-session hook endpoint |
+| `OPENCODE_CONFIG` | set by board | Exported for opencode agents; config that loads the board's reporting plugin |
 | `AGENTBOARD_NPM_PATH` | `npm` | Path to npm binary (for MCP servers) |
 | `AGENTBOARD_NODE_PATH` | `node` | Path to node binary (for MCP servers) |
 | `NO_COLOR` | — | Disable colored output (respects standard env var) |

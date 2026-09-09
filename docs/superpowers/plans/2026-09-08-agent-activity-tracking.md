@@ -21,7 +21,7 @@
 - Activity states are exactly: `active`, `idle`, `waiting_input`, `blocked`, `exited`. TUI also renders a derived `no_signal`.
 - Reconciler may never write `blocked` and may never clear a sticky state.
 - Notifications fire only on entry into the needs-input family.
-- This plan covers spec phases 1 to 4 and phase 6 (FreeCode). Phases 5, 7, and 8 (OpenCode server, Cursor and Codex mappers, WebSocket) are separate plans.
+- This plan covers spec phases 1 to 4 and phase 6 (FreeCode). Phase 5 (OpenCode) shipped separately as a board-supplied OpenCode plugin. Phases 7 and 8 (Cursor and Codex mappers, WebSocket) are separate plans.
 - FreeCode tasks edit the sibling repo at `/home/ayande/Project/freecode` (TypeScript, pnpm, `node:test` via `pnpm --filter @freecode/core test`). Commit there separately with the same conventional-commit style.
 
 ---
@@ -3688,7 +3688,7 @@ Guards: while `blocked`, only a turn boundary or the `PostToolUse` of the blocki
 
 Notifications: `notify-send` fires once on entry into `waiting_input` or `blocked`, skipped when the board is focused and the ticket is visible.
 
-Not yet covered: OpenCode (still PTY typing), Cursor, Codex, mobile push. See `docs/superpowers/specs/2026-09-08-agent-activity-tracking-design.md`.
+Not yet covered: Cursor, Codex, mobile push. OpenCode is covered by its own plugin (spec phase 5). See `docs/superpowers/specs/2026-09-08-agent-activity-tracking-design.md`.
 ```
 
 - [ ] **Step 2: Commit**
