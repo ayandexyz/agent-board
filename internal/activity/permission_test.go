@@ -26,7 +26,7 @@ func postRaw(t *testing.T, base, sessionID, body string) string {
 func TestPermissionHeldOpenUntilResolved(t *testing.T) {
 	r, base, _ := newRunning(t)
 	r.PermissionTimeout = 5 * time.Second
-	r.Launch("s1", "L1", "claude-code")
+	r.Launch("s1", "L1", NestedDecision)
 
 	replies := make(chan string, 1)
 	go func() {
@@ -67,23 +67,31 @@ func TestPermissionTimesOutWithNoDecision(t *testing.T) {
 }
 
 func TestPermissionReplyShapePerAgent(t *testing.T) {
-	if got := string(permissionReply("deny", true)); got != `{"hookSpecificOutput":{"decision":"deny","hookEventName":"PermissionRequest"}}` {
-		t.Fatalf("freecode reply = %s", got)
+	if got := string(permissionReply(BareDecision, "deny")); got != `{"hookSpecificOutput":{"decision":"deny","hookEventName":"PermissionRequest"}}` {
+		t.Fatalf("bare reply = %s", got)
 	}
-	if got := string(permissionReply("", false)); got != "{}" {
+	if got := string(permissionReply(NestedDecision, "allow")); got != `{"hookSpecificOutput":{"decision":{"behavior":"allow"},"hookEventName":"PermissionRequest"}}` {
+		t.Fatalf("nested reply = %s", got)
+	}
+	if got := string(permissionReply(NestedDecision, "")); got != "{}" {
 		t.Fatalf("empty decision = %s, want {}", got)
+	}
+	// An agent that cannot be answered over the wire gets no decision at all.
+	if got := string(permissionReply(nil, "allow")); got != "{}" {
+		t.Fatalf("codecless reply = %s, want {}", got)
 	}
 }
 
 func TestPermissionAlertIsDecidable(t *testing.T) {
 	r, base, _ := newRunning(t)
 	r.PermissionTimeout = 200 * time.Millisecond
+	alerts, _ := r.Subscribe()
 	done := make(chan string, 1)
 	go func() { done <- postRaw(t, base, "s1", `{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"ls"}}`) }()
 	defer func() { <-done }()
 
 	select {
-	case a := <-r.Events():
+	case a := <-alerts:
 		if !a.Decidable {
 			t.Fatal("permission alert not marked decidable")
 		}
@@ -92,5 +100,46 @@ func TestPermissionAlertIsDecidable(t *testing.T) {
 		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("no alert")
+	}
+}
+
+// A question is not an approval. Claude Code delivers AskUserQuestion as a
+// PermissionRequest, but allowing it would only let the agent ask — the answer
+// is still typed in the pane, exactly as it is for OpenCode and FreeCode. So
+// the board must not hold the hook open pretending a decision is coming, and
+// must not raise an approve/deny modal for it.
+func TestQuestionPermissionIsNotHeldForADecision(t *testing.T) {
+	r, base, _ := newRunning(t)
+	r.PermissionTimeout = 10 * time.Second
+	alerts, _ := r.Subscribe()
+
+	replied := make(chan string, 1)
+	go func() {
+		replied <- postRaw(t, base, "s1", `{"hook_event_name":"PermissionRequest","tool_name":"AskUserQuestion",`+
+			`"tool_input":{"questions":[{"question":"Which capital city is on two continents?"}]}}`)
+	}()
+
+	select {
+	case got := <-replied:
+		if got != "{}" {
+			t.Fatalf("reply = %s, want {} so the agent asks in its own pane", got)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("question was held open waiting on a decision nobody can make")
+	}
+
+	select {
+	case a := <-alerts:
+		if a.State != StateWaitingInput {
+			t.Errorf("state = %q, want %q", a.State, StateWaitingInput)
+		}
+		if a.Decidable {
+			t.Error("question alert marked decidable; the TUI would raise an approval modal")
+		}
+		if !strings.Contains(a.Body, "two continents") {
+			t.Errorf("body = %q, want the question itself", a.Body)
+		}
+	case <-time.After(2 * time.Second):
+		t.Fatal("no alert raised for the question")
 	}
 }

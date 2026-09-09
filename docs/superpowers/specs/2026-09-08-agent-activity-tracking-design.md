@@ -39,7 +39,7 @@ Vendor signal sources, ranked by reliability:
 | Agent | Signal | Answer |
 |---|---|---|
 | Claude Code | Hooks passed per process with `--settings '<inline json>'`, `http` handler type. Events: `Notification` (permission_prompt, idle_prompt, agent_needs_input), `PermissionRequest`, `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Stop`, `SessionEnd`. Every payload carries `session_id`, `transcript_path`, `cwd`; tool events add `tool_name`, `tool_input`, `tool_use_id`. | `PermissionRequest` hook response `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"|"deny"}}}`. Free-text answers via `send-keys`. |
-| OpenCode | One `opencode serve --port N`; each worktree driven with `?directory=`. SSE `GET /event`: `permission.asked`, `question.asked`, `session.status`, `session.idle`. | `POST /session/{id}/permissions/{permId}`, `POST /question/{id}/reply`. |
+| OpenCode | Board-supplied plugin loaded per pane through `OPENCODE_CONFIG`. Its `chat.message`, `tool.execute.before`, `tool.execute.after` and `event` hooks POST Claude-Code-shaped payloads, so the board's Claude mapper and receiver are reused unchanged. | The plugin holds the `permission.asked` event open on the board's reply, then answers through `POST /session/{id}/permissions/{permissionID}` with `once` or `reject`. |
 | Cursor CLI | `.cursor/hooks.json` in the worktree: `beforeShellExecution`, `beforeMCPExecution`, `stop`. | Hook stdout `{"permission":"allow"|"deny"}`. |
 | Codex | `~/.codex/hooks.json`: `PermissionRequest`, `Stop`, `SessionEnd`. | Hook decision. |
 | FreeCode (own agent, `~/Project/freecode`) | Built-in `board-webhook` hook inside FreeCode, enabled by `FREECODE_HOOK_URL`. Emits the same JSON shape as Claude Code hooks, so the board's Claude mapper and receiver are reused unchanged. | Same held `PermissionRequest` response; FreeCode maps `allow` to `allow-once` via `answerPermission` and `deny` to `rejectPermission`. |
@@ -152,7 +152,46 @@ AGENTBOARD_LAUNCH_ID
 AGENTBOARD_HOOK_URL
 ```
 
-OpenCode moves off PTY typing entirely: the orchestrator owns one `opencode serve` process and creates sessions over HTTP with the worktree as `directory`. The tmux window then runs `opencode attach` for display. This is a separate phase.
+OpenCode keeps its PTY spawn. It has no settings flag, so the board exports
+`OPENCODE_CONFIG=~/.agentboard/cache/opencode-config.json`, a document whose
+only key is `plugin: ["file://~/.agentboard/cache/opencode-plugin.mjs"]`.
+OpenCode merges plugin lists across config sources rather than replacing them,
+so the user's own plugins survive. Neither file is per session: the plugin
+reads `AGENTBOARD_SESSION_ID`, `AGENTBOARD_LAUNCH_ID` and
+`AGENTBOARD_HOOK_URL` out of its own pane environment, and is inert without
+them.
+
+### OpenCode
+
+The plugin is `internal/activity/opencode_plugin.mjs`, embedded in the binary
+and written to the cache at spawn.
+
+| Plugin hook | Posted as |
+|---|---|
+| plugin load | `SessionStart` |
+| `chat.message` | `UserPromptSubmit` |
+| `tool.execute.before` | `PreToolUse` with `tool_use_id` = `callID` |
+| `tool.execute.after` | `PostToolUse` with the same id |
+| `event: session.idle` | `Stop` |
+| `event: question.asked` | `Notification`, `agent_needs_input`, with the event's `questions` array as `tool_input` |
+| `event: permission.asked` (`permission.updated` on older builds) | `PermissionRequest`, awaited |
+
+Lifecycle posts time out after 5 s and swallow their errors; the permission
+post waits eleven minutes, just past the board's own ten-minute hold, so the
+pane picker takes over rather than both sides giving up at once. The plugin
+reads either decision shape — Claude Code's nested `{"behavior":...}` or
+FreeCode's bare string — so the board needs no per-agent branch for it. A
+decision of `allow` becomes `once`; `deny` becomes `reject`; no decision
+leaves the pane picker alone. If the picker answered first, the reply 404s and
+is ignored.
+
+Questions are alert-only: OpenCode exposes no remote reply for them, so the
+answer is typed in the pane and the board clears `waiting_input` at the next
+turn boundary. The `question` tool is gated behind
+`OPENCODE_ENABLE_QUESTION_TOOL` and is not offered in headless `opencode run`.
+
+Not covered: OpenCode emits no session-end event, so process exit is still
+detected by the pane monitor.
 
 ### FreeCode
 
@@ -207,11 +246,11 @@ Sessions 1, 2, 4, 5 keep streaming their own hooks throughout. None of this depe
 ## Phases
 
 1. Fix the four blocking orchestrator bugs first (see `2026-09-08-orchestrator-bug-report.md`): leaked monitor goroutines would corrupt the new state.
-2. Activity state, store migration, hub, hook receiver, Claude Code mapper, TUI glyph and header. Desktop notification.
+2. **Done for Claude Code.** Activity state, store migration, hub, hook receiver, Claude Code mapper, TUI glyph and header. Desktop notification.
 3. Waiting overlay and `Resolve` with InputGuard.
 4. Fallback reconciler.
-5. OpenCode over `opencode serve`. Deletes the PTY character injection.
-6. FreeCode built-in webhook plus board env export.
+5. OpenCode plugin plus board `OPENCODE_CONFIG` export. **Done.**
+6. FreeCode built-in webhook plus board env export. **Done.**
 7. Cursor and Codex mappers.
 8. WebSocket subscriber for the mobile app.
 

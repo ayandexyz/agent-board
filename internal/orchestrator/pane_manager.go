@@ -170,13 +170,7 @@ func (pm *PaneManager) CreatePane(ctx context.Context, req RunRequest) (*AgentPa
 
 	// Write the prompt to a persistent file (not tmp, to avoid cleanup issues)
 	// Store in user's home directory under .agentboard/cache
-	homeDir, err := os.UserHomeDir()
-	if err != nil {
-		homeDir = "/tmp"
-	}
-	cacheDir := fmt.Sprintf("%s/.agentboard/cache", homeDir)
-	_ = os.MkdirAll(cacheDir, 0755)
-	promptFile := fmt.Sprintf("%s/prompt-%s.txt", cacheDir, req.SessionID)
+	promptFile := fmt.Sprintf("%s/prompt-%s.txt", cacheDir(), req.SessionID)
 	if err := os.WriteFile(promptFile, []byte(req.Prompt), 0644); err != nil {
 		pm.killWindow(pane.WindowID)
 		cancel()

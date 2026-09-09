@@ -3,6 +3,8 @@ package config
 import (
 	"fmt"
 	"os/exec"
+
+	"github.com/ayan-de/agent-board/internal/agents"
 )
 
 type DetectedAgent struct {
@@ -14,47 +16,32 @@ type DetectedAgent struct {
 	LogoClr string
 }
 
-type agentSpec struct {
-	name    string
-	binary  string
-	logo    string
-	logoClr string
-}
-
-var agentSpecs = []agentSpec{
-	{name: "claude-code", binary: "claude", logo: " ▐▛███▜▌\n▝▜█████▛▘\n  ▘▘ ▝▝", logoClr: "#D97757"},
-	{name: "opencode", binary: "opencode", logo: "  █▀▀█\n  █__█\n  ▀▀▀▀", logoClr: "#808080"},
-	{name: "codex", binary: "codex", logo: " ▗▄▄▄▖\n ▐▝▞▙▌\n ▝▀▀▀▘", logoClr: "#10A37F"},
-	{name: "cursor", binary: "cursor", logo: " ▛▀▀▀▜\n ▌ ▗▖ ▐\n ▙▄▄▄▟", logoClr: "#F0DB4F"},
-	{name: "freecode", binary: "freecode", logo: "   █▀▀ \n   █▀▀ \n   ▀   ", logoClr: "#e7c98a"},
-}
-
 func DetectAgents() []DetectedAgent {
-	agents := make([]DetectedAgent, len(agentSpecs))
-	for i, spec := range agentSpecs {
-		path, err := exec.LookPath(spec.binary)
-		agents[i] = DetectedAgent{
-			Name:    spec.name,
-			Binary:  spec.binary,
+	catalog := agents.Spawnable()
+	detected := make([]DetectedAgent, len(catalog))
+	for i, spec := range catalog {
+		path, err := exec.LookPath(spec.Binary)
+		detected[i] = DetectedAgent{
+			Name:    spec.Name,
+			Binary:  spec.Binary,
 			Path:    path,
 			Found:   err == nil,
-			Logo:    spec.logo,
-			LogoClr: spec.logoClr,
+			Logo:    spec.Logo,
+			LogoClr: spec.Color,
 		}
 		if err == nil {
-			agents[i].Path = fmt.Sprintf("%s (%s)", spec.binary, path)
+			detected[i].Path = fmt.Sprintf("%s (%s)", spec.Binary, path)
 		}
 	}
-	return agents
+	return detected
 }
 
 func AgentColor(name string) string {
-	for _, spec := range agentSpecs {
-		if spec.name == name {
-			return spec.logoClr
-		}
+	spec, ok := agents.Lookup(name)
+	if !ok {
+		return ""
 	}
-	return ""
+	return spec.Color
 }
 
 type AgentSpec struct {
@@ -65,13 +52,14 @@ type AgentSpec struct {
 }
 
 func Specs() []AgentSpec {
-	out := make([]AgentSpec, len(agentSpecs))
-	for i, spec := range agentSpecs {
+	catalog := agents.Spawnable()
+	out := make([]AgentSpec, len(catalog))
+	for i, spec := range catalog {
 		out[i] = AgentSpec{
-			Name:    spec.name,
-			Binary:  spec.binary,
-			Logo:    spec.logo,
-			LogoClr: spec.logoClr,
+			Name:    spec.Name,
+			Binary:  spec.Binary,
+			Logo:    spec.Logo,
+			LogoClr: spec.Color,
 		}
 	}
 	return out
