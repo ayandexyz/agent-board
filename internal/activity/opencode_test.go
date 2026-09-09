@@ -119,14 +119,16 @@ func TestOpenCodePluginQuestionReachesTheBoard(t *testing.T) {
 	}
 
 	r := New()
+	// Notify is a plain field read by the serving goroutine, so it has to be
+	// set before Start hands the receiver to net/http.
+	notified := make(chan string, 4)
+	r.Notify = func(title, body string) { notified <- body }
 	base, err := r.Start()
 	if err != nil {
 		t.Fatalf("Start() error = %v", err)
 	}
 	defer r.Close()
 	r.Launch("SES-Q", "L9", "opencode")
-	notified := make(chan string, 4)
-	r.Notify = func(title, body string) { notified <- body }
 
 	const event = `{"type":"question.asked","properties":{"id":"que_1","sessionID":"ses_1",` +
 		`"questions":[{"question":"Which capital city is on two continents?","header":"Quiz","options":[]}]}}`
