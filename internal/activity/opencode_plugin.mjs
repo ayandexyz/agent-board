@@ -95,6 +95,18 @@ export const server = async ({ client }) => {
         case "permission.updated":
           await askPermission(event.properties)
           return
+        // The question tool is answered in the pane — OpenCode exposes no
+        // remote reply — so this only raises the alert. Its `questions` array
+        // is already the shape the board reads for AskUserQuestion, so the
+        // notification quotes the question itself.
+        case "question.asked":
+          await report({
+            hook_event_name: "Notification",
+            notification_type: "agent_needs_input",
+            tool_name: "AskUserQuestion",
+            tool_input: { questions: event.properties.questions ?? [] },
+          })
+          return
       }
     },
   }

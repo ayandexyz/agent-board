@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestOpenCodeConfigWritesPluginAndConfig(t *testing.T) {
@@ -68,5 +69,86 @@ func TestOpenCodePluginParses(t *testing.T) {
 	out, err := exec.Command(bin, "--check", filepath.Join(dir, openCodePluginFile)).CombinedOutput()
 	if err != nil {
 		t.Fatalf("%s --check failed: %v\n%s", bin, err, out)
+	}
+}
+
+// The plugin forwards OpenCode's question.asked as an AskUserQuestion
+// notification, carrying that event's own `questions` array verbatim.
+func TestOpenCodeQuestionNotificationNeedsInput(t *testing.T) {
+	r := New()
+	var gotTitle, gotBody string
+	r.Notify = func(title, body string) { gotTitle, gotBody = title, body }
+
+	body := `{"hook_event_name":"Notification","notification_type":"agent_needs_input",` +
+		`"tool_name":"AskUserQuestion","tool_input":{"questions":[` +
+		`{"question":"Which capital city is on two continents?","header":"Quiz","options":[]}]}}`
+	if !r.apply("SES-01", "", decodePayload(t, body)) {
+		t.Fatal("question notification was not applied")
+	}
+	if got := r.StateOf("SES-01"); got != StateWaitingInput {
+		t.Errorf("state = %q, want %q", got, StateWaitingInput)
+	}
+	if !strings.Contains(gotTitle, "needs your answer") {
+		t.Errorf("title = %q", gotTitle)
+	}
+	if gotBody != "Which capital city is on two continents?" {
+		t.Errorf("body = %q, want the question itself", gotBody)
+	}
+}
+
+func decodePayload(t *testing.T, body string) payload {
+	t.Helper()
+	var p payload
+	if err := json.Unmarshal([]byte(body), &p); err != nil {
+		t.Fatalf("decode payload: %v", err)
+	}
+	return p
+}
+
+// End to end for the half that broke: OpenCode raises question.asked, and the
+// board must end up with a needs-input alert quoting the question. Driving the
+// real plugin file keeps the two halves from drifting apart again.
+func TestOpenCodePluginQuestionReachesTheBoard(t *testing.T) {
+	bun, err := exec.LookPath("bun")
+	if err != nil {
+		t.Skip("no bun on PATH")
+	}
+	dir := t.TempDir()
+	if _, err := OpenCodeConfig(dir); err != nil {
+		t.Fatalf("OpenCodeConfig() error = %v", err)
+	}
+
+	r := New()
+	base, err := r.Start()
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	defer r.Close()
+	r.Launch("SES-Q", "L9", "opencode")
+	notified := make(chan string, 4)
+	r.Notify = func(title, body string) { notified <- body }
+
+	const event = `{"type":"question.asked","properties":{"id":"que_1","sessionID":"ses_1",` +
+		`"questions":[{"question":"Which capital city is on two continents?","header":"Quiz","options":[]}]}}`
+	cmd := exec.Command(bun, "opencode_plugin_probe.mjs", filepath.Join(dir, openCodePluginFile), event)
+	cmd.Env = append(os.Environ(),
+		"AGENTBOARD_HOOK_URL="+base,
+		"AGENTBOARD_SESSION_ID=SES-Q",
+		"AGENTBOARD_LAUNCH_ID=L9",
+	)
+	if out, err := cmd.CombinedOutput(); err != nil {
+		t.Fatalf("probe failed: %v\n%s", err, out)
+	}
+
+	select {
+	case body := <-notified:
+		if body != "Which capital city is on two continents?" {
+			t.Errorf("notification body = %q, want the question itself", body)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("no notification raised for question.asked")
+	}
+	if got := r.StateOf("SES-Q"); got != StateWaitingInput {
+		t.Errorf("state = %q, want %q", got, StateWaitingInput)
 	}
 }

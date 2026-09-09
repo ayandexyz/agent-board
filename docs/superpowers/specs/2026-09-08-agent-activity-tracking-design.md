@@ -173,6 +173,7 @@ and written to the cache at spawn.
 | `tool.execute.before` | `PreToolUse` with `tool_use_id` = `callID` |
 | `tool.execute.after` | `PostToolUse` with the same id |
 | `event: session.idle` | `Stop` |
+| `event: question.asked` | `Notification`, `agent_needs_input`, with the event's `questions` array as `tool_input` |
 | `event: permission.asked` (`permission.updated` on older builds) | `PermissionRequest`, awaited |
 
 Lifecycle posts time out after 5 s and swallow their errors; the permission
@@ -184,9 +185,13 @@ decision of `allow` becomes `once`; `deny` becomes `reject`; no decision
 leaves the pane picker alone. If the picker answered first, the reply 404s and
 is ignored.
 
+Questions are alert-only: OpenCode exposes no remote reply for them, so the
+answer is typed in the pane and the board clears `waiting_input` at the next
+turn boundary. The `question` tool is gated behind
+`OPENCODE_ENABLE_QUESTION_TOOL` and is not offered in headless `opencode run`.
+
 Not covered: OpenCode emits no session-end event, so process exit is still
-detected by the pane monitor, and it has no question event, so a question
-reads as `active` until the turn ends.
+detected by the pane monitor.
 
 ### FreeCode
 

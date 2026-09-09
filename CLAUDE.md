@@ -299,11 +299,20 @@ without them.
 The plugin posts Claude-Code-shaped payloads, so there is no OpenCode mapper in
 Go: `chat.message` as `UserPromptSubmit`, `tool.execute.before`/`after` as
 `PreToolUse`/`PostToolUse` (`tool_use_id` = OpenCode's `callID`), `session.idle`
-as `Stop`, and `permission.asked` as a `PermissionRequest` it awaits. `allow`
+as `Stop`, `question.asked` as an `agent_needs_input` notification carrying the
+event's own `questions` array (already the shape `toolDetail` reads for
+`AskUserQuestion`, so the alert quotes the question), and `permission.asked` as
+a `PermissionRequest` it awaits. `allow`
 replies become `POST /session/{id}/permissions/{permissionID}` with `once`,
 `deny` becomes `reject`, and no decision leaves the pane picker to the user. It
-reads either decision shape, nested or bare. OpenCode emits no session-end
+reads either decision shape, nested or bare. Questions are answered in the pane
+— OpenCode exposes no remote reply for them — and OpenCode emits no session-end
 event, so process exit is still detected by the pane monitor.
+
+`internal/activity/opencode_plugin_probe.mjs` drives the plugin without
+OpenCode, so a test can feed it one event and watch what reaches the receiver.
+Note the `question` tool is gated behind `OPENCODE_ENABLE_QUESTION_TOOL` and is
+not offered in headless `opencode run`.
 
 FreeCode support lives in the FreeCode repo at `apps/core/src/hooks/builtin/board-webhook.ts`, registered from `initHooks`. It posts Claude Code shaped hook payloads (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`) so the board needs no FreeCode-specific mapper, and it answers permission requests remotely: a reply of `{"hookSpecificOutput":{"decision":"allow"}}` resolves the agent's pending prompt as a one-shot grant, `deny` rejects it, and no decision leaves the choice to the pane picker.
 
