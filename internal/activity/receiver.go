@@ -147,7 +147,7 @@ func (r *Receiver) handle(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 	launchID := req.Header.Get("X-Agentboard-Launch")
-	if p.HookEventName == "PermissionRequest" {
+	if p.HookEventName == "PermissionRequest" && !p.asksQuestion() {
 		r.servePermission(w, req, sessionID, launchID, p)
 		return
 	}
