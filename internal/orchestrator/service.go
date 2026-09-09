@@ -4,26 +4,32 @@ import (
 	"context"
 	"fmt"
 	"os/exec"
+	"strings"
 	"sync"
 
+	"github.com/google/uuid"
+
+	"github.com/ayan-de/agent-board/internal/activity"
 	"github.com/ayan-de/agent-board/internal/llm"
 	"github.com/ayan-de/agent-board/internal/store"
 )
 
 type Service struct {
-	store      Store
-	llm        LLMClient
-	runner     Runner
-	agentRunner  AgentRunner
-	ctx        ContextCarryProvider
+	store         Store
+	llm           LLMClient
+	runner        Runner
+	agentRunner   AgentRunner
+	ctx           ContextCarryProvider
 	worktrees     Worktrees
 	merger        Merger
 	mergeStrategy MergeStrategy
 	logs          map[string][]string
-	mu         sync.RWMutex
+	mu            sync.RWMutex
 
 	activeSessions map[string]*AgentSession
 	completionCh   chan RunCompletion
+	hookBaseURL    string
+	onLaunch       func(sessionID, launchID, agent string)
 }
 
 // AgentSession tracks an active agent session
@@ -54,6 +60,50 @@ func (s *Service) SetAgentRunner(pr AgentRunner) {
 	s.agentRunner = pr
 }
 
+// SetHookBaseURL points spawned agents at the board's local hook receiver.
+// Empty (the default) means no receiver is running, and no hook environment is
+// exported at all — an agent that cannot reach the board must not be told to try.
+func (s *Service) SetHookBaseURL(url string) {
+	s.hookBaseURL = strings.TrimRight(url, "/")
+}
+
+// SetLaunchNotifier is told the launch id of every spawn that gets hook
+// environment, so the receiver can drop reports from an earlier launch.
+func (s *Service) SetLaunchNotifier(f func(sessionID, launchID, agent string)) {
+	s.onLaunch = f
+}
+
+// launchSpec is the identity a spawned agent reports back with. The launch id
+// lets the board drop hooks from an earlier launch of the same session, whose
+// late events would otherwise corrupt the current one's state.
+func (s *Service) launchSpec(agent, sessionID, launchID string) ([]string, string) {
+	env := []string{
+		"AGENTBOARD_SESSION_ID=" + sessionID,
+		"AGENTBOARD_LAUNCH_ID=" + launchID,
+	}
+	if s.hookBaseURL == "" {
+		return env, ""
+	}
+	if s.onLaunch != nil {
+		s.onLaunch(sessionID, launchID, agent)
+	}
+	hookURL := s.hookBaseURL + "/hooks/" + sessionID
+	env = append(env, "AGENTBOARD_HOOK_URL="+s.hookBaseURL)
+
+	var settings string
+	switch agent {
+	// FreeCode reads its own variable and posts Claude-shaped hook payloads to
+	// this exact per-session URL.
+	case "freecode":
+		env = append(env, "FREECODE_HOOK_URL="+hookURL)
+	// Claude Code takes its hooks per process, so nothing is written into the
+	// ticket worktree and no earlier launch's settings can linger.
+	case "claude-code", "claudecode":
+		settings = activity.ClaudeSettingsJSON(hookURL)
+	}
+	return env, settings
+}
+
 func (s *Service) SetWorktrees(w Worktrees) {
 	s.worktrees = w
 	if m, ok := w.(Merger); ok {
@@ -68,6 +118,9 @@ func (s *Service) prepareWorkDir(ctx context.Context, ticketID, sessionID string
 	ticket, err := s.store.GetTicket(ctx, ticketID)
 	if err != nil {
 		return "", err
+	}
+	if !ticket.UsesWorktree() {
+		return "", nil
 	}
 	info, err := s.worktrees.Ensure(ctx, ticket)
 	if err != nil {
@@ -119,23 +172,24 @@ func (s *Service) StartAdHocRun(ctx context.Context, ticketID, agent, prompt str
 
 	onComplete := func(outcome, summary, resumeCommand string) {
 		_ = s.FinishRun(context.Background(), FinishRunInput{
-			TicketID:  ticketID,
-			SessionID: session.ID,
-			Outcome:   outcome,
-			Summary:   summary,
+			TicketID:      ticketID,
+			SessionID:     session.ID,
+			Outcome:       outcome,
+			Summary:       summary,
 			ResumeCommand: resumeCommand,
 		})
 		s.completionCh <- RunCompletion{
-			TicketID:  ticketID,
-			SessionID: session.ID,
-			Outcome:   outcome,
-			Summary:   summary,
+			TicketID:      ticketID,
+			SessionID:     session.ID,
+			Outcome:       outcome,
+			Summary:       summary,
 			ResumeCommand: resumeCommand,
 		}
 	}
 
 	var handle RunHandle
 	if s.agentRunner != nil {
+		env, settings := s.launchSpec(agent, session.ID, uuid.NewString())
 		handle, err = s.agentRunner.Start(ctx, RunRequest{
 			TicketID:   ticketID,
 			SessionID:  session.ID,
@@ -144,6 +198,8 @@ func (s *Service) StartAdHocRun(ctx context.Context, ticketID, agent, prompt str
 			WorkDir:    workDir,
 			Reporter:   func(line string) { s.AppendLog(session.ID, line) },
 			OnComplete: onComplete,
+			Env:        env,
+			Settings:   settings,
 		})
 	} else {
 		return store.Session{}, fmt.Errorf("no runner configured")
@@ -274,23 +330,24 @@ func (s *Service) StartApprovedRun(ctx context.Context, proposalID string) (stor
 
 	onComplete := func(outcome, summary, resumeCommand string) {
 		_ = s.FinishRun(context.Background(), FinishRunInput{
-			TicketID:  proposal.TicketID,
-			SessionID: session.ID,
-			Outcome:   outcome,
-			Summary:   summary,
+			TicketID:      proposal.TicketID,
+			SessionID:     session.ID,
+			Outcome:       outcome,
+			Summary:       summary,
 			ResumeCommand: resumeCommand,
 		})
 		s.completionCh <- RunCompletion{
-			TicketID:  proposal.TicketID,
-			SessionID: session.ID,
-			Outcome:   outcome,
-			Summary:   summary,
+			TicketID:      proposal.TicketID,
+			SessionID:     session.ID,
+			Outcome:       outcome,
+			Summary:       summary,
 			ResumeCommand: resumeCommand,
 		}
 	}
 
 	var handle RunHandle
 	if s.agentRunner != nil {
+		env, settings := s.launchSpec(proposal.Agent, session.ID, uuid.NewString())
 		handle, err = s.agentRunner.Start(ctx, RunRequest{
 			TicketID:   proposal.TicketID,
 			SessionID:  session.ID,
@@ -299,6 +356,8 @@ func (s *Service) StartApprovedRun(ctx context.Context, proposalID string) (stor
 			WorkDir:    workDir,
 			Reporter:   func(line string) { s.AppendLog(session.ID, line) },
 			OnComplete: onComplete,
+			Env:        env,
+			Settings:   settings,
 		})
 	} else {
 		return store.Session{}, fmt.Errorf("no runner configured")
@@ -348,6 +407,18 @@ func (s *Service) GetActiveSessions() []*AgentSession {
 }
 
 // GetActiveSessionByTicket returns the active session for a ticket
+// WindowForSession returns the tmux window name a live session runs in, so a
+// notification can name the window the user has to switch to. Mirrors the name
+// tmuxAgentRunner.Start gives the window.
+func (s *Service) WindowForSession(sessionID string) string {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if _, ok := s.activeSessions[sessionID]; !ok {
+		return ""
+	}
+	return "agent-" + shortID(sessionID, 8)
+}
+
 func (s *Service) GetActiveSessionByTicket(ticketID string) (*AgentSession, bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -434,16 +505,16 @@ func (s *Service) GetPaneContent(sessionID string, lines int) (string, error) {
 
 // SwitchToPane switches the tmux view to a specific pane
 func (s *Service) SwitchToPane(sessionID string) error {
-    // Try TmuxRunner first
-    if tmuxRunner, ok := s.runner.(*TmuxRunner); ok {
-        pm := tmuxRunner.GetPaneManager()
-        return pm.SwitchToPane(sessionID)
-    }
-    // Try PtyRunner
-    if s.agentRunner != nil {
-        if paneID, ok := s.agentRunner.GetPaneID(sessionID); ok {
-            return exec.Command("tmux", "select-pane", "-t", paneID).Run()
-        }
-    }
-    return fmt.Errorf("pane switching only available with TmuxRunner or AgentRunner")
+	// Try TmuxRunner first
+	if tmuxRunner, ok := s.runner.(*TmuxRunner); ok {
+		pm := tmuxRunner.GetPaneManager()
+		return pm.SwitchToPane(sessionID)
+	}
+	// Try PtyRunner
+	if s.agentRunner != nil {
+		if paneID, ok := s.agentRunner.GetPaneID(sessionID); ok {
+			return exec.Command("tmux", "select-pane", "-t", paneID).Run()
+		}
+	}
+	return fmt.Errorf("pane switching only available with TmuxRunner or AgentRunner")
 }

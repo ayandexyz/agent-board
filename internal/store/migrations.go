@@ -10,6 +10,7 @@ func (s *Store) migrate() error {
 		priority    TEXT DEFAULT 'medium',
 		agent       TEXT DEFAULT '',
 		branch      TEXT DEFAULT '',
+		branch_mode TEXT DEFAULT 'worktree',
 		worktree_path TEXT DEFAULT '',
 		pr_url      TEXT DEFAULT '',
 		tags        TEXT DEFAULT '[]',
@@ -97,6 +98,18 @@ func (s *Store) migrate() error {
 	err = s.db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('tickets') WHERE name='worktree_path'").Scan(&hasCol)
 	if err == nil && !hasCol {
 		_, err = s.db.Exec("ALTER TABLE tickets ADD COLUMN worktree_path TEXT DEFAULT ''")
+		if err != nil {
+			return err
+		}
+	}
+
+	err = s.db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('tickets') WHERE name='branch_mode'").Scan(&hasCol)
+	if err == nil && !hasCol {
+		_, err = s.db.Exec("ALTER TABLE tickets ADD COLUMN branch_mode TEXT DEFAULT 'worktree'")
+		if err != nil {
+			return err
+		}
+		_, err = s.db.Exec("UPDATE tickets SET branch_mode = 'worktree' WHERE branch_mode IS NULL OR branch_mode = ''")
 		if err != nil {
 			return err
 		}

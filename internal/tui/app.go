@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ayan-de/agent-board/internal/activity"
 	"github.com/ayan-de/agent-board/internal/config"
 	"github.com/ayan-de/agent-board/internal/keybinding"
 	"github.com/ayan-de/agent-board/internal/orchestrator"
@@ -150,6 +151,16 @@ type Orchestrator interface {
 
 type AppDeps struct {
 	Orchestrator Orchestrator
+	// ActivityEvents delivers "agent needs you" alerts from the hook receiver.
+	// Nil when no receiver is running.
+	ActivityEvents <-chan activity.Alert
+	// ResolvePermission answers a held permission request: "allow", "deny", or
+	// "" to leave the choice to the agent's own picker in the pane. Nil when no
+	// receiver is running.
+	ResolvePermission func(sessionID, decision string)
+	// CurrentBranch is the branch the repository is checked out on, shown as
+	// the "current branch" choice on a ticket. Empty outside a git repo.
+	CurrentBranch string
 }
 
 type App struct {
@@ -168,8 +179,12 @@ type App struct {
 	mergeModal   MergeModal
 	textInput    TextInputModal
 	notification NotificationStack
-	quit         bool
-	runCommand   tea.Cmd
+
+	activityEvents    <-chan activity.Alert
+	resolvePermission func(sessionID, decision string)
+
+	quit       bool
+	runCommand tea.Cmd
 
 	kanban       KanbanModel
 	ticketView   TicketViewModel
@@ -208,13 +223,15 @@ func NewApp(cfg *config.Config, s *store.Store, reg *theme.Registry, deps AppDep
 	a := &App{
 		store:               s,
 		orchestrator:        deps.Orchestrator,
+		activityEvents:      deps.ActivityEvents,
+		resolvePermission:   deps.ResolvePermission,
 		resolver:            resolver,
 		config:              cfg,
 		registry:            reg,
 		focus:               focusBoard,
 		view:                viewBoard,
 		kanban:              kanban,
-		ticketView:          NewTicketViewModel(s, resolver, t, agents),
+		ticketView:          NewTicketViewModel(s, resolver, t, agents).SetGitContext(deps.CurrentBranch, cfg.Git.BranchPrefix),
 		dashboard:           NewDashboardModel(s, deps.Orchestrator, resolver, agents, t),
 		generatingProposals: make(map[string]bool),
 		completionCh:        deps.Orchestrator.CompletionChan(),
@@ -254,12 +271,50 @@ func (a *App) applyTheme() {
 	a.notification.SetTheme(t)
 }
 
+// openPermissionModal asks the user to approve the tool call an agent is
+// blocked on. Cancelling denies: a permission dialog left unanswered stalls the
+// agent for the whole hook timeout, so the modal fails closed.
+func (a *App) openPermissionModal(alert activity.Alert) {
+	sessionID := alert.SessionID
+	resolve := a.resolvePermission
+	a.modal.Open(
+		alert.Title,
+		alert.Body,
+		func() tea.Cmd {
+			resolve(sessionID, "allow")
+			return nil
+		},
+		func() { resolve(sessionID, "deny") },
+	)
+}
+
+// activityNotificationDuration is how long an "agent needs you" card stays up.
+const activityNotificationDuration = 20 * time.Second
+
+// waitForActivityCmd blocks on the next agent alert and re-arms itself, the
+// same shape as the run-completion listener.
+func (a *App) waitForActivityCmd() tea.Cmd {
+	if a.activityEvents == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		alert, ok := <-a.activityEvents
+		if !ok {
+			return nil
+		}
+		return alert
+	}
+}
+
 func (a *App) Init() tea.Cmd {
 	// Always arm the animation tick at startup. The kanban only advances
 	// its animFrame when an agent is active, so idle ticks are cheap.
 	cmds := []tea.Cmd{tea.EnterAltScreen}
 	if a.kanban.NeedsTick() {
 		cmds = append(cmds, animationTick())
+	}
+	if c := a.waitForActivityCmd(); c != nil {
+		cmds = append(cmds, c)
 	}
 	return tea.Batch(cmds...)
 }
@@ -419,6 +474,24 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			nil,
 		)
 		return a, nil
+	case activity.Alert:
+		// Longer than the usual toast: this one is a request for the user to
+		// go do something, not a report that something happened. It has to
+		// survive them looking away from the board.
+		variant := NotificationWarning
+		if msg.State == activity.StateBlocked {
+			variant = NotificationError
+		}
+		next := a.waitForActivityCmd()
+		if msg.Decidable && a.resolvePermission != nil && !a.modal.Active() {
+			a.openPermissionModal(msg)
+			return a, next
+		}
+		return a, tea.Batch(
+			a.notification.Show(msg.Title, msg.Body, variant, activityNotificationDuration),
+			next,
+		)
+
 	case notificationMsg:
 		return a, a.showNotification(msg.title, msg.message, msg.variant)
 	case searchQueryMsg:
@@ -715,7 +788,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 	}
 
-	if a.view == viewTicket && a.ticketView.mode == ticketEditMode {
+	if a.view == viewTicket && (a.ticketView.mode == ticketEditMode || a.ticketView.mode == ticketAdHocPromptMode) {
 		var cmd tea.Cmd
 		a.ticketView, cmd = a.ticketView.Update(msg)
 		return a, cmd

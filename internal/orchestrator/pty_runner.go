@@ -21,12 +21,46 @@ func NewTmuxAgentRunner(tmuxSession string) (*tmuxAgentRunner, error) {
 	}, nil
 }
 
-func newWindowArgs(sessionName, windowName, workDir string) []string {
+func newWindowArgs(sessionName, windowName, workDir string, env []string) []string {
 	args := []string{"new-window", "-t", sessionName, "-d", "-a", "-P", "-F", "#{window_id}:#{pane_id}", "-n", windowName}
 	if workDir != "" {
 		args = append(args, "-c", workDir)
 	}
+	// -e sets the variable for the new pane only, so each agent sees its own
+	// session identity without touching the tmux server environment.
+	for _, kv := range env {
+		args = append(args, "-e", kv)
+	}
 	return args
+}
+
+// launchArgs caches an agent's settings document and returns the arguments that
+// point the agent at it. The document is a kilobyte of JSON; typed into the
+// pane it would bury the launch line in the user's scrollback.
+func launchArgs(cacheDir, sessionID, settings string) ([]string, error) {
+	if settings == "" {
+		return nil, nil
+	}
+	path := fmt.Sprintf("%s/settings-%s.json", cacheDir, sessionID)
+	if err := os.WriteFile(path, []byte(settings), 0644); err != nil {
+		return nil, fmt.Errorf("orchestrator.launchArgs: %w", err)
+	}
+	return []string{"--settings", path}, nil
+}
+
+// agentCommand is the line typed into the pane to launch the agent. Arguments
+// are single quoted because one of them is an inline JSON document.
+func agentCommand(bin string, args []string) string {
+	parts := make([]string, 0, len(args)+1)
+	parts = append(parts, bin)
+	for _, a := range args {
+		if strings.HasPrefix(a, "-") {
+			parts = append(parts, a)
+			continue
+		}
+		parts = append(parts, "'"+strings.ReplaceAll(a, "'", "")+"'")
+	}
+	return strings.Join(parts, " ")
 }
 
 func (r *tmuxAgentRunner) Start(ctx context.Context, req RunRequest) (RunHandle, error) {
@@ -37,7 +71,7 @@ func (r *tmuxAgentRunner) Start(ctx context.Context, req RunRequest) (RunHandle,
 
 	windowName := fmt.Sprintf("agent-%s", shortID(req.SessionID, 8))
 
-	cmd := exec.Command("tmux", newWindowArgs(sessionName, windowName, req.WorkDir)...)
+	cmd := exec.Command("tmux", newWindowArgs(sessionName, windowName, req.WorkDir, req.Env)...)
 	output, err := cmd.Output()
 	if err != nil {
 		return RunHandle{}, fmt.Errorf("create tmux window: %w", err)
@@ -61,17 +95,22 @@ func (r *tmuxAgentRunner) Start(ctx context.Context, req RunRequest) (RunHandle,
 		return RunHandle{}, fmt.Errorf("write prompt file: %w", err)
 	}
 
-	if err := exec.Command("tmux", "send-keys", "-t", paneID, cfg.Bin, "Enter").Run(); err != nil {
+	args, err := launchArgs(cacheDir, req.SessionID, req.Settings)
+	if err != nil {
+		return RunHandle{}, err
+	}
+
+	if err := exec.Command("tmux", "send-keys", "-t", paneID, agentCommand(cfg.Bin, args), "Enter").Run(); err != nil {
 		return RunHandle{}, fmt.Errorf("send bin to pane: %w", err)
 	}
 
-	go r.injectPrompt(paneID, req.SessionID, cfg, promptFile)
+	go r.injectPrompt(ctx, paneID, req.SessionID, cfg, promptFile)
 
 	if req.Reporter != nil {
 		req.Reporter(fmt.Sprintf("Agent %s started in tmux pane %s", req.Agent, paneID))
 	}
 
-	go r.monitorPane(req.SessionID, paneID, cfg.Bin, req.OnComplete)
+	go r.monitorPane(ctx, req.SessionID, paneID, cfg.Bin, req.OnComplete)
 
 	return RunHandle{
 		Outcome: "running",
@@ -79,9 +118,19 @@ func (r *tmuxAgentRunner) Start(ctx context.Context, req RunRequest) (RunHandle,
 	}, nil
 }
 
-func (r *tmuxAgentRunner) injectPrompt(paneID, sessionID string, cfg *pty.Config, promptFile string) {
-	if err := waitForReady(paneID, cfg); err != nil {
+func (r *tmuxAgentRunner) injectPrompt(ctx context.Context, paneID, sessionID string, cfg *pty.Config, promptFile string) {
+	if err := waitForReady(ctx, paneID, cfg); err != nil {
 		return
+	}
+
+	// The ready marker is a banner; the composer that takes the keystrokes can
+	// be a beat behind it.
+	if cfg.ReadyWait > 0 {
+		select {
+		case <-ctx.Done():
+			return
+		case <-time.After(cfg.ReadyWait):
+		}
 	}
 
 	promptBytes, err := os.ReadFile(promptFile)
@@ -91,6 +140,9 @@ func (r *tmuxAgentRunner) injectPrompt(paneID, sessionID string, cfg *pty.Config
 	prompt := string(promptBytes)
 
 	for _, c := range prompt {
+		if ctx.Err() != nil {
+			return
+		}
 		if c == '\n' {
 			if err := exec.Command("tmux", "send-keys", "-t", paneID, "-l", " ").Run(); err != nil {
 				return
@@ -105,14 +157,17 @@ func (r *tmuxAgentRunner) injectPrompt(paneID, sessionID string, cfg *pty.Config
 	exec.Command("tmux", "send-keys", "-t", paneID, "Enter").Run()
 }
 
-func waitForReady(paneID string, cfg *pty.Config) error {
-	timeout := cfg.ReadyWait
+func waitForReady(ctx context.Context, paneID string, cfg *pty.Config) error {
+	timeout := cfg.ReadyTimeout
 	if timeout < 3*time.Second {
 		timeout = 3 * time.Second
 	}
 	deadline := time.Now().Add(timeout)
 
 	for {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
 		output, err := exec.Command("tmux", "capture-pane", "-t", paneID, "-p", "-J", "-S", "-200").Output()
 		if err == nil {
 			stripped := pty.StripANSI(string(output))
@@ -127,7 +182,7 @@ func waitForReady(paneID string, cfg *pty.Config) error {
 	}
 }
 
-func (r *tmuxAgentRunner) monitorPane(sessionID string, paneID string, agentBin string, onComplete func(outcome, summary, resumeCommand string)) {
+func (r *tmuxAgentRunner) monitorPane(ctx context.Context, sessionID string, paneID string, agentBin string, onComplete func(outcome, summary, resumeCommand string)) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
 
@@ -135,7 +190,7 @@ func (r *tmuxAgentRunner) monitorPane(sessionID string, paneID string, agentBin 
 	sawAgentRunning := false
 	for {
 		select {
-		case <-context.Background().Done():
+		case <-ctx.Done():
 			return
 		case <-ticker.C:
 			// Capture output continuously so we always have the latest content

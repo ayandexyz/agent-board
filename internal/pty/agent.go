@@ -22,7 +22,12 @@ type Config struct {
 	IdlePatterns    []*regexp.Regexp
 	GracePeriod     time.Duration
 	FallbackTimeout time.Duration
-	ReadyWait       time.Duration
+	// ReadyWait is how long to let the agent settle after its ready marker
+	// appears, before typing. A banner can be drawn a beat before the composer
+	// that accepts the keystrokes.
+	ReadyWait time.Duration
+	// ReadyTimeout is how long to wait for the ready marker at all.
+	ReadyTimeout time.Duration
 }
 
 func DefaultFormatPrompt(prompt string) string {
@@ -87,20 +92,25 @@ func NewOpenCode() *Config {
 		GracePeriod:     8 * time.Second,
 		FallbackTimeout: 5 * time.Second,
 		ReadyWait:       800 * time.Millisecond,
+		ReadyTimeout:    30 * time.Second,
 	}
 }
 
 func NewClaudeCode() *Config {
 	return &Config{
-		Name:            "claude-code",
-		Bin:             "claude",
-		ReadyPattern:    regexp.MustCompile(`bypass permissions on`),
+		Name: "claude-code",
+		Bin:  "claude",
+		// The banner is the only marker every build and permission mode shares.
+		// The footer reads "auto mode on", "accept edits on", "plan mode on",
+		// or nothing at all; older builds read "bypass permissions on".
+		ReadyPattern:    regexp.MustCompile(`Claude Code v\d|bypass permissions on`),
 		SendPrompt:      SendPromptSingleLine,
 		FormatPrompt:    ClaudeFormatPrompt,
 		IdlePatterns:    []*regexp.Regexp{regexp.MustCompile(`Press\s+Ctrl-C\s+again\s+to\s+exit`)},
 		GracePeriod:     10 * time.Second,
 		FallbackTimeout: 10 * time.Second,
 		ReadyWait:       2 * time.Second,
+		ReadyTimeout:    30 * time.Second,
 	}
 }
 
@@ -116,6 +126,7 @@ func NewCodex() *Config {
 		GracePeriod:     10 * time.Second,
 		FallbackTimeout: 8 * time.Second,
 		ReadyWait:       1 * time.Second,
+		ReadyTimeout:    30 * time.Second,
 	}
 }
 
@@ -131,6 +142,7 @@ func NewGeminiCode() *Config {
 		GracePeriod:     10 * time.Second,
 		FallbackTimeout: 10 * time.Second,
 		ReadyWait:       2 * time.Second,
+		ReadyTimeout:    30 * time.Second,
 	}
 }
 
@@ -154,6 +166,7 @@ func NewFreeCode() *Config {
 		GracePeriod:     8 * time.Second,
 		FallbackTimeout: 5 * time.Second,
 		ReadyWait:       300 * time.Millisecond,
+		ReadyTimeout:    30 * time.Second,
 	}
 }
 

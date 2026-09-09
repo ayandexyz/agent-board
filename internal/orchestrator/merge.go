@@ -169,7 +169,7 @@ func (s *Service) MoveTicketStatus(ctx context.Context, ticketID, newStatus stri
 		return err
 	}
 
-	if ticket.Status == "review" && newStatus == "done" && s.merger != nil {
+	if ticket.Status == "review" && newStatus == "done" && s.merger != nil && ticket.UsesWorktree() {
 		hasWork := ticket.WorktreePath != "" || ticket.Branch != "" || ticket.PRURL != ""
 		if hasWork {
 			if ticket.PRURL != "" {

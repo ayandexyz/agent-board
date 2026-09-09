@@ -43,7 +43,7 @@ esac
 		t.Fatalf("NewTmuxAgentRunner() error = %v", err)
 	}
 
-	_, err = runner.Start(context.Background(), RunRequest{
+	_, err = runner.Start(testCtx(t), RunRequest{
 		SessionID: "session-12345678",
 		Agent:     "opencode",
 		Prompt:    "Investigate the failing test",
@@ -52,14 +52,9 @@ esac
 		t.Fatalf("Start() error = %v", err)
 	}
 
-	time.Sleep(300 * time.Millisecond)
-
-	raw, err := os.ReadFile(logFile)
-	if err != nil {
-		t.Fatalf("read tmux log: %v", err)
-	}
-
-	log := string(raw)
+	log := waitForTmuxLog(t, logFile, func(log string) bool {
+		return strings.Contains(log, "send-keys -t %42 -l")
+	})
 	if strings.Contains(log, "send-keys -t %42 claude run") {
 		t.Fatalf("Start() launched the wrong agent command:\n%s", log)
 	}
@@ -110,7 +105,7 @@ esac
 		t.Fatalf("NewTmuxAgentRunner() error = %v", err)
 	}
 
-	if _, err := runner.Start(context.Background(), RunRequest{
+	if _, err := runner.Start(testCtx(t), RunRequest{
 		SessionID: "session-87654321",
 		Agent:     "opencode",
 		Prompt:    "Investigate the failing test",
@@ -173,7 +168,7 @@ esac
 		}
 	}()
 
-	if _, err := runner.Start(context.Background(), RunRequest{
+	if _, err := runner.Start(testCtx(t), RunRequest{
 		SessionID: "SES-01",
 		Agent:     "opencode",
 		Prompt:    "Investigate the failing test",
@@ -236,7 +231,7 @@ esac
 		t.Fatalf("NewTmuxAgentRunner() error = %v", err)
 	}
 
-	if _, err := runner.Start(context.Background(), RunRequest{
+	if _, err := runner.Start(testCtx(t), RunRequest{
 		TicketID:  "AGT-01",
 		SessionID: "SES-01",
 		Agent:     "opencode",
@@ -245,13 +240,13 @@ esac
 		t.Fatalf("Start() error = %v", err)
 	}
 
-	time.Sleep(300 * time.Millisecond)
-
-	raw, err := os.ReadFile(logFile)
-	if err != nil {
-		t.Fatalf("read tmux log: %v", err)
-	}
-	log := string(raw)
+	// Injection is character-by-character at 10ms, so the trailing Enter lands
+	// several hundred ms after Start returns. Poll for it rather than guessing
+	// a sleep: too short fails here, and leaves a goroutine still typing into
+	// the next test's log.
+	log := waitForTmuxLog(t, logFile, func(log string) bool {
+		return strings.Contains(log, "send-keys -t %42 Enter\n")
+	})
 	if !strings.Contains(log, "new-window") {
 		t.Fatalf("Start() did not create the ticket agent session:\n%s", log)
 	}
@@ -305,7 +300,7 @@ esac
 		t.Fatalf("NewTmuxAgentRunner() error = %v", err)
 	}
 
-	if _, err := runner.Start(context.Background(), RunRequest{
+	if _, err := runner.Start(testCtx(t), RunRequest{
 		SessionID: "session-newline",
 		Agent:     "opencode",
 		Prompt:    "line one\nline two",
@@ -315,20 +310,11 @@ esac
 
 	// Wait until the trailing submit Enter has been written. Injecting
 	// "P0MX_DONE_SIGNAL\nline one\nline two" with 10ms per char takes ~320ms.
-	deadline := time.Now().Add(3 * time.Second)
-	var log string
-	for time.Now().Before(deadline) {
-		raw, err := os.ReadFile(logFile)
-		if err != nil {
-			t.Fatalf("read tmux log: %v", err)
-		}
-		log = string(raw)
+	log := waitForTmuxLog(t, logFile, func(log string) bool {
 		// The trailing Enter follows the last char of "two" ('o').
-		if strings.Contains(log, "send-keys -t %42 -l o\n") && strings.Count(log, "send-keys -t %42 Enter\n") >= 2 {
-			break
-		}
-		time.Sleep(50 * time.Millisecond)
-	}
+		return strings.Contains(log, "send-keys -t %42 -l o\n") &&
+			strings.Contains(log, "send-keys -t %42 Enter\n")
+	})
 
 	if strings.Contains(log, "send-keys -t %42 -l C-m") {
 		t.Fatalf("Start() typed literal C-m characters instead of handling newlines:\n%s", log)
@@ -336,11 +322,11 @@ esac
 	if strings.Contains(log, "send-keys -t %42 -l C-") {
 		t.Fatalf("Start() typed literal C- key name for newlines:\n%s", log)
 	}
-	// Exactly one trailing submit Enter is expected (the "opencode Enter"
-	// launcher line is the other one).
+	// Exactly one bare Enter: the prompt submit. The launcher logs as
+	// "send-keys -t %42 opencode Enter" and does not match.
 	enterCount := strings.Count(log, "send-keys -t %42 Enter\n")
-	if enterCount != 2 {
-		t.Fatalf("Start() sent %d Enter key presses (want 2: one to launch opencode, one to submit the prompt); in-prompt newlines must be replaced with spaces, not Enter (would submit prematurely):\n%s", enterCount, log)
+	if enterCount != 1 {
+		t.Fatalf("Start() sent %d bare Enter key presses (want 1, the prompt submit); in-prompt newlines must be replaced with spaces, not Enter (would submit prematurely):\n%s", enterCount, log)
 	}
 	if !strings.Contains(log, "send-keys -t %42 -l  ") {
 		t.Fatalf("Start() did not send a literal space for newlines (prompt should be single-line):\n%s", log)
@@ -402,7 +388,7 @@ esac
 	}
 	done := make(chan result, 1)
 
-	_, err = runner.Start(context.Background(), RunRequest{
+	_, err = runner.Start(testCtx(t), RunRequest{
 		SessionID: "session-exit-test",
 		Agent:     "freecode",
 		Prompt:    "Greet me",
@@ -461,7 +447,7 @@ esac
 		t.Fatalf("NewTmuxAgentRunner() error = %v", err)
 	}
 
-	_, err = runner.Start(context.Background(), RunRequest{
+	_, err = runner.Start(testCtx(t), RunRequest{
 		SessionID: "session-freecode",
 		Agent:     "freecode",
 		Prompt:    "Greet me",
@@ -470,14 +456,9 @@ esac
 		t.Fatalf("Start() error = %v", err)
 	}
 
-	time.Sleep(300 * time.Millisecond)
-
-	raw, err := os.ReadFile(logFile)
-	if err != nil {
-		t.Fatalf("read tmux log: %v", err)
-	}
-	log := string(raw)
-
+	log := waitForTmuxLog(t, logFile, func(log string) bool {
+		return strings.Contains(log, "send-keys -t %42 -l")
+	})
 	if strings.Contains(log, "freecode run") {
 		t.Fatalf("Start() launched freecode in headless 'run' subcommand mode, must open its interactive TUI:\n%s", log)
 	}
@@ -486,5 +467,90 @@ esac
 	}
 	if !strings.Contains(log, "send-keys -t %42 -l") {
 		t.Fatalf("Start() did not inject the prompt character-by-character:\n%s", log)
+	}
+}
+
+// waitForTmuxLog polls the fake tmux log until done reports the run has
+// finished writing, then returns it. Waiting on the log rather than sleeping
+// keeps a still-typing injectPrompt goroutine from outliving the test and
+// writing into the next one's log — PATH is process-wide, so a leaked
+// goroutine finds whichever fake tmux the current test installed.
+func waitForTmuxLog(t *testing.T, logFile string, done func(string) bool) string {
+	t.Helper()
+	deadline := time.Now().Add(5 * time.Second)
+	var log string
+	for {
+		raw, err := os.ReadFile(logFile)
+		if err != nil && !os.IsNotExist(err) {
+			t.Fatalf("read tmux log: %v", err)
+		}
+		log = string(raw)
+		if done(log) || time.Now().After(deadline) {
+			return log
+		}
+		time.Sleep(20 * time.Millisecond)
+	}
+}
+
+// testCtx returns a context cancelled when the test ends, so the runner's
+// injectPrompt and monitorPane goroutines stop with it. PATH is process-wide:
+// a goroutine that outlives its test finds the *next* test's fake tmux and
+// corrupts its log.
+func testCtx(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	return ctx
+}
+
+// Claude Code 2.1.251 never prints "bypass permissions on"; its footer reads
+// "auto mode on", "accept edits on", "plan mode on", or nothing at all in the
+// default mode. The banner is what marks the TUI as up.
+func TestPtyRunnerInjectsPromptIntoClaudeCode(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-test,123,0")
+	t.Setenv("HOME", t.TempDir())
+
+	tmuxDir := t.TempDir()
+	logFile := filepath.Join(tmuxDir, "tmux.log")
+	t.Setenv("FAKE_TMUX_LOG_CLAUDE", logFile)
+	t.Setenv("PATH", tmuxDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	// Captured from a real pane running claude 2.1.251.
+	fakeTmux := `#!/bin/sh
+printf '%s\n' "$*" >> "$FAKE_TMUX_LOG_CLAUDE"
+case "$1" in
+  new-window)
+    printf '%%42\n'
+    ;;
+  capture-pane)
+    printf ' claude@2.1.251\n mise ~/.config/mise/config.toml tools: claude@2.1.251\n Claude Code v2.1.251\n Opus 5 (1M context) with medium effort\n ~/.agentboard/worktrees/agent-board/OPEN-68\n>\n  auto mode on (shift+tab to cycle)\n'
+    ;;
+  list-panes)
+    exit 1
+    ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(tmuxDir, "tmux"), []byte(fakeTmux), 0755); err != nil {
+		t.Fatalf("write fake tmux: %v", err)
+	}
+
+	runner, err := NewTmuxAgentRunner("agentboard")
+	if err != nil {
+		t.Fatalf("NewTmuxAgentRunner() error = %v", err)
+	}
+
+	if _, err := runner.Start(testCtx(t), RunRequest{
+		SessionID: "session-claude",
+		Agent:     "claude-code",
+		Prompt:    "Investigate the failing test",
+	}); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	log := waitForTmuxLog(t, logFile, func(log string) bool {
+		return strings.Contains(log, "send-keys -t %42 -l")
+	})
+	if !strings.Contains(log, "send-keys -t %42 -l") {
+		t.Fatalf("Start() never injected the ticket prompt into claude:\n%s", log)
 	}
 }

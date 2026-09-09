@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"path/filepath"
 
+	"github.com/ayan-de/agent-board/internal/activity"
 	"github.com/ayan-de/agent-board/internal/config"
 	"github.com/ayan-de/agent-board/internal/git"
 	"github.com/ayan-de/agent-board/internal/llm"
@@ -80,9 +81,25 @@ func runTUI() int {
 		orch.SetAgentRunner(agentRunner)
 	}
 
+	var resolvePermission func(sessionID, decision string)
+	recv := activity.New()
+	recv.Label = orch.WindowForSession
+	if base, err := recv.Start(); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: activity receiver unavailable: %v\n", err)
+	} else {
+		defer recv.Close()
+		orch.SetHookBaseURL(base)
+		orch.SetLaunchNotifier(recv.Launch)
+		resolvePermission = func(sessionID, decision string) { recv.Resolve(sessionID, decision) }
+	}
+
 	g := git.New(git.ExecRunner())
+	currentBranch := ""
 	if cwd, err := os.Getwd(); err == nil {
 		if repoRoot, err := g.RepoRoot(context.Background(), cwd); err == nil {
+			if branch, err := g.CurrentBranch(context.Background(), repoRoot); err == nil {
+				currentBranch = branch
+			}
 			wm := orchestrator.NewWorktreeManager(
 				g,
 				git.NewGH(git.ExecRunner()),
@@ -105,7 +122,10 @@ func runTUI() int {
 	}
 
 	app, err := tui.NewApp(cfg, s, reg, tui.AppDeps{
-		Orchestrator: orch,
+		Orchestrator:      orch,
+		ActivityEvents:    recv.Events(),
+		ResolvePermission: resolvePermission,
+		CurrentBranch:     currentBranch,
 	})
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error creating app: %v\n", err)

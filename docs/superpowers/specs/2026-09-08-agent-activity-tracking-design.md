@@ -38,10 +38,11 @@ Vendor signal sources, ranked by reliability:
 
 | Agent | Signal | Answer |
 |---|---|---|
-| Claude Code | Hooks passed per process with `--settings '<inline json>'`, `http` handler type. Events: `Notification` (permission_prompt, idle_prompt, agent_needs_input), `PermissionRequest`, `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Stop`, `SessionEnd`. Every payload carries `session_id`, `tool_name`, `tool_input`, `tool_use_id`, `transcript_path`. | `PermissionRequest` hook response `{"hookSpecificOutput":{"decision":"allow"|"deny"}}`. Free-text answers via `send-keys`. |
+| Claude Code | Hooks passed per process with `--settings '<inline json>'`, `http` handler type. Events: `Notification` (permission_prompt, idle_prompt, agent_needs_input), `PermissionRequest`, `PreToolUse`, `PostToolUse`, `UserPromptSubmit`, `Stop`, `SessionEnd`. Every payload carries `session_id`, `transcript_path`, `cwd`; tool events add `tool_name`, `tool_input`, `tool_use_id`. | `PermissionRequest` hook response `{"hookSpecificOutput":{"hookEventName":"PermissionRequest","decision":{"behavior":"allow"|"deny"}}}`. Free-text answers via `send-keys`. |
 | OpenCode | One `opencode serve --port N`; each worktree driven with `?directory=`. SSE `GET /event`: `permission.asked`, `question.asked`, `session.status`, `session.idle`. | `POST /session/{id}/permissions/{permId}`, `POST /question/{id}/reply`. |
 | Cursor CLI | `.cursor/hooks.json` in the worktree: `beforeShellExecution`, `beforeMCPExecution`, `stop`. | Hook stdout `{"permission":"allow"|"deny"}`. |
 | Codex | `~/.codex/hooks.json`: `PermissionRequest`, `Stop`, `SessionEnd`. | Hook decision. |
+| FreeCode (own agent, `~/Project/freecode`) | Built-in `board-webhook` hook inside FreeCode, enabled by `FREECODE_HOOK_URL`. Emits the same JSON shape as Claude Code hooks, so the board's Claude mapper and receiver are reused unchanged. | Same held `PermissionRequest` response; FreeCode maps `allow` to `allow-once` via `answerPermission` and `deny` to `rejectPermission`. |
 | Unknown agent | `tmux capture-pane -p -e -J`, hashed, stable across several polls, plus a structural prompt match. | `send-keys -l`, pause, `Enter`, re-capture to verify. |
 
 tmux's own `monitor-activity` / `monitor-silence` hooks fire only for windows that are not visible, so they cannot be the primary mechanism.
@@ -94,6 +95,19 @@ The handler maps the native payload to an `ActivitySignal{Event, State, ToolName
 
 For `PermissionRequest` the handler holds the HTTP response open until the board resolves the request or a timeout elapses. Claude Code waits on the hook, so the reply body is the decision. On timeout the handler returns no decision, which lets the agent fall back to its own prompt in the pane. The user can still answer there.
 
+### Verified against Claude Code 2.1.251
+
+Read off the shipped binary's own hook schemas and confirmed by running `claude` against a logging receiver:
+
+- `--settings` takes an inline JSON string. The http handler is `{"type":"http","url","headers","allowedEnvVars","timeout"}`; `timeout` is seconds and defaults to ten minutes.
+- A header value interpolates `$AGENTBOARD_LAUNCH_ID` from the pane environment **only** when `allowedEnvVars` names it. Unlisted `$VAR` references resolve to the empty string.
+- `PreToolUse`, `PostToolUse`, `PostToolUseFailure` and `PermissionDenied` carry `tool_use_id`. **`PermissionRequest` does not** — it carries `tool_name`, `tool_input`, `permission_suggestions`. The tool-flight rule therefore cannot key the blocked candidate on a `tool_use_id` taken from the dialog; it has only the tool name, which is exactly the ambiguous case the spec already fails closed on.
+- `Notification` carries `message`, `title`, `notification_type`.
+- `SessionEnd` reasons are `clear`, `resume`, `logout`, `prompt_input_exit`, `other`.
+- The permission decision is nested: `decision: {behavior: "allow"|"deny"}`, not a bare string. FreeCode reads a bare `decision: "allow"`, so `Resolve` must write whichever shape the answering agent expects.
+- Hooks run inline and block the turn, so lifecycle reports carry a 5 s timeout and only `PermissionRequest` is allowed to wait on a human.
+- Observed in a `-p` run: `UserPromptSubmit`, `PreToolUse`, `PostToolUse` (same `tool_use_id`), `Stop`, `SessionEnd`. `SessionStart` did not fire in `-p` mode.
+
 ### State transitions (Claude Code mapper)
 
 | Hook event | Resulting state |
@@ -140,6 +154,22 @@ AGENTBOARD_HOOK_URL
 
 OpenCode moves off PTY typing entirely: the orchestrator owns one `opencode serve` process and creates sessions over HTTP with the worktree as `directory`. The tmux window then runs `opencode attach` for display. This is a separate phase.
 
+### FreeCode
+
+FreeCode is a TypeScript agent split into a `freecode serve` JSON-RPC backend and a thin TUI. Its core already has a hook registry with 14 events, an in-process bus that publishes `permission.asked` and `question.asked`, a pending-promise permission flow with `answerPermission(requestId, answer)` and `rejectPermission(requestId)`, and a `question` tool. Nothing in the board needs a FreeCode-specific mapper.
+
+Changes inside FreeCode:
+
+- New `apps/core/src/hooks/builtin/board-webhook.ts`, registered from `initHooks` in `hooks/bootstrap.ts` next to the rtk hook. Inert unless `FREECODE_HOOK_URL` is set.
+- It registers callback hooks for `SessionStart`, `TurnStart`, `PreToolUse`, `PostToolUse`, `Stop`, and POSTs a Claude-shaped body: `hook_event_name`, `session_id`, `tool_name`, `tool_use_id`, `tool_input`. `TurnStart` is sent as `UserPromptSubmit` because FreeCode's own `UserPromptSubmit` carries the system prompt. Every request carries `X-Agentboard-Launch: $AGENTBOARD_LAUNCH_ID`.
+- It subscribes to `permission.asked` and POSTs `hook_event_name: PermissionRequest` with the tool name and args, waiting up to FreeCode's own 30 minute prompt timeout. A reply with `hookSpecificOutput.decision` of `allow` calls `answerPermission` with `allow-once`; `deny` calls `rejectPermission`; an empty reply leaves the pane picker to the user. The picker and the webhook race; whoever answers first wins, which FreeCode already handles.
+- It subscribes to `question.asked` and POSTs `hook_event_name: Notification, notification_type: agent_needs_input`. The answer is typed in the pane; the board clears `waiting_input` at the next turn boundary.
+- `executeTool` in `agent/loop.ts` adds `toolUseId: toolCall.id` to the hook context so PreToolUse and PostToolUse can carry the id the tool-flight rule needs.
+
+Changes inside the board: for agent `freecode`, export `FREECODE_HOOK_URL=<hookBaseURL>/hooks/<sessionID>` alongside the three common variables. No `--settings` argument.
+
+Not covered: FreeCode sends no `SessionEnd`; process exit is still detected by the pane monitor.
+
 ### TUI
 
 - Ticket card glyph: `●` active, `○` idle, `?` waiting_input, `!` blocked, `×` exited, `~` no_signal.
@@ -181,10 +211,11 @@ Sessions 1, 2, 4, 5 keep streaming their own hooks throughout. None of this depe
 3. Waiting overlay and `Resolve` with InputGuard.
 4. Fallback reconciler.
 5. OpenCode over `opencode serve`. Deletes the PTY character injection.
-6. Cursor and Codex mappers.
-7. WebSocket subscriber for the mobile app.
+6. FreeCode built-in webhook plus board env export.
+7. Cursor and Codex mappers.
+8. WebSocket subscriber for the mobile app.
 
 ## Open questions
 
-- Whether to install hooks via `--settings` inline or write `.claude/settings.local.json` into the worktree. Inline keeps the worktree clean and is per process. Chosen: inline.
+- Whether to install hooks via `--settings` inline or write `.claude/settings.local.json` into the worktree. Chosen: neither exactly — the document is cached as `~/.agentboard/cache/settings-<sessionID>.json` and passed by path. It is still per process and still out of the worktree, but inline JSON turned the pane's launch line into a kilobyte of unreadable scrollback.
 - Notification click-to-focus needs a helper that runs `tmux select-window`. `notify-send --action` is available on recent libnotify; otherwise the body just names the session.

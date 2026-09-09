@@ -239,9 +239,76 @@ When viewing dashboard with active sessions ([app.go:474-502](internal/tui/app.g
 
 ---
 
+## Agent Activity Tracking (in progress)
+
+Spawned agents report their own state over HTTP rather than the board guessing from the screen.
+
+`internal/activity` is the receiver: a loopback `net/http` server on `127.0.0.1:0`, started in `runTUI` and handed to the orchestrator via `SetHookBaseURL`. It accepts `POST /hooks/{sessionID}` carrying Claude-Code-shaped hook JSON, maps it to a state (`active`, `idle`, `waiting_input`, `blocked`, `exited`), and fires one `notify-send` on entry into the needs-input family. The alert body is `toolDetail` in `internal/activity/detail.go`: the question for `AskUserQuestion`, the command for `Bash`, the path for a file edit, and the bare tool name for anything unlisted — never a dump of `tool_input`. A permission request naming `AskUserQuestion` is `waiting_input`, not `blocked`; what is waiting is an answer, not an approval. `X-Agentboard-Launch` is checked against the launch id recorded at spawn, so a relaunched session's late hooks are dropped.
+
+`PermissionRequest` is held open (10 minutes by default, `Receiver.PermissionTimeout`) while the board asks: the alert is flagged `Decidable`, the TUI raises an approval modal instead of a toast, and `Receiver.Resolve(sessionID, decision)` writes the reply — nested `{"behavior":...}` for Claude Code, a bare string for FreeCode, chosen from the agent recorded at `Launch`. Cancelling the modal denies; a timeout answers `{}` and the pane picker takes over.
+
+Not built yet: the store migration, the event hub, the tool-flight rule beyond "any PostToolUse clears the block", the TUI glyph/waiting overlay, and the capture-pane reconciler.
+
+Every agent pane is launched with its session identity exported via `tmux new-window -e`:
+
+| Variable | Meaning |
+|---|---|
+| `AGENTBOARD_SESSION_ID` | The session this pane belongs to |
+| `AGENTBOARD_LAUNCH_ID` | Per-spawn id; lets the board drop hooks from an earlier launch of the same session |
+| `AGENTBOARD_HOOK_URL` | Base URL of the board's local hook receiver |
+| `FREECODE_HOOK_URL` | FreeCode only: `<base>/hooks/<sessionID>` |
+
+Claude Code takes no environment variable of its own. It is launched as
+`claude --settings ~/.agentboard/cache/settings-<sessionID>.json`, whose
+contents are built by `activity.ClaudeSettingsJSON`,
+registering an `http` hook at `<base>/hooks/<sessionID>` for `SessionStart`,
+`UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PermissionRequest`,
+`Notification`, `Stop` and `SessionEnd`. The launch id rides along as the
+`X-Agentboard-Launch` header, interpolated from `$AGENTBOARD_LAUNCH_ID` in the
+pane — which Claude Code only does because `allowedEnvVars` lists it. The
+document is cached next to the prompt file rather than passed inline: a
+kilobyte of JSON typed into the pane buries the launch line in the user's
+scrollback. It stays out of the ticket worktree either way.
+
+Hooks block the turn, so lifecycle reports time out after 5 s; only
+`PermissionRequest` waits (600 s), since that one is a human decision. Note the
+two agents disagree on the reply shape: Claude Code wants
+`decision: {"behavior": "allow"}` nested, FreeCode wants a bare
+`decision: "allow"`. `PermissionRequest` from Claude Code carries no
+`tool_use_id`.
+
+The document reaches the pane through `RunRequest.Settings`; `launchArgs` in
+`internal/orchestrator/pty_runner.go` caches it and `agentCommand` quotes the
+path into the launch line.
+
+Nothing is exported unless `Service.SetHookBaseURL` was called, so an agent is never told to reach a receiver that is not running.
+
+FreeCode support lives in the FreeCode repo at `apps/core/src/hooks/builtin/board-webhook.ts`, registered from `initHooks`. It posts Claude Code shaped hook payloads (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`) so the board needs no FreeCode-specific mapper, and it answers permission requests remotely: a reply of `{"hookSpecificOutput":{"decision":"allow"}}` resolves the agent's pending prompt as a one-shot grant, `deny` rejects it, and no decision leaves the choice to the pane picker.
+
+See `docs/superpowers/specs/2026-09-08-agent-activity-tracking-design.md` and `docs/superpowers/plans/2026-09-08-agent-activity-tracking.md`.
+
+---
+
 ## Git Worktree Isolation & Merge Flow
 
 Every ticket gets an isolated git worktree when an agent starts on it, so parallel agents never collide on the filesystem.
+
+### Branch mode (per ticket)
+
+The ticket's Branch row is a toggle, not a text field: `e` on it opens
+**Current branch | Worktree branch**.
+
+- `worktree` (default, `tickets.branch_mode`): existing behaviour — the agent
+  gets its own worktree and `agent/<ticket-id>` branch, and Review -> Done is
+  merge-gated.
+- `current`: no worktree. `prepareWorkDir` returns an empty work dir so the
+  agent runs in the board's own checkout on whatever branch is already out, and
+  `MoveTicketStatus` skips the merge gate.
+
+Choosing "Worktree branch" drops straight into an edit box prefilled with the
+default branch name so it can be renamed before the agent starts. Choosing
+"Current branch" clears `tickets.branch`. `store.Ticket.UsesWorktree()` is the
+single predicate everything else reads.
 
 ### Lifecycle
 
@@ -343,6 +410,10 @@ Backlog -> In Progress            -> Review              -> Done
 | `AGENTBOARD_GIT_WORKTREE_ROOT` | `~/.agentboard/worktrees` | Root dir for ticket worktrees |
 | `AGENTBOARD_GIT_BRANCH_PREFIX` | `agent/` | Branch prefix for generated branches |
 | `AGENTBOARD_GIT_BASE_BRANCH` | auto | Base branch for worktrees and merges |
+| `AGENTBOARD_SESSION_ID` | set by board | Exported into each agent pane; the session the pane belongs to |
+| `AGENTBOARD_LAUNCH_ID` | set by board | Exported into each agent pane; per-spawn generation id |
+| `AGENTBOARD_HOOK_URL` | set by board | Exported into each agent pane; base URL of the hook receiver |
+| `FREECODE_HOOK_URL` | set by board | Exported for freecode agents; per-session hook endpoint |
 | `AGENTBOARD_NPM_PATH` | `npm` | Path to npm binary (for MCP servers) |
 | `AGENTBOARD_NODE_PATH` | `node` | Path to node binary (for MCP servers) |
 | `NO_COLOR` | — | Disable colored output (respects standard env var) |

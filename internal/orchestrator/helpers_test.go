@@ -200,3 +200,16 @@ type fakeCtx struct{}
 
 func (f fakeCtx) LoadContext(ctx context.Context, ticketID string) (string, error) { return "", nil }
 func (f fakeCtx) SaveContext(ctx context.Context, ticketID, outcome string) error  { return nil }
+
+// capturingRunner records the RunRequest it was handed, so tests can assert on
+// the environment the board exports into an agent's tmux window.
+type capturingRunner struct {
+	last orchestrator.RunRequest
+}
+
+func (c *capturingRunner) Start(_ context.Context, req orchestrator.RunRequest) (orchestrator.RunHandle, error) {
+	c.last = req
+	return orchestrator.RunHandle{Outcome: "running", Summary: "captured"}, nil
+}
+
+func (c *capturingRunner) GetPaneID(_ string) (string, bool) { return "", false }
