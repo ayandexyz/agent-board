@@ -61,6 +61,15 @@ func (p payload) next() (State, bool) {
 	return "", false
 }
 
+// asksQuestion reports whether a permission request is really a question.
+// Claude Code delivers AskUserQuestion as a PermissionRequest, but allowing it
+// only lets the agent ask — the answer is typed in the pane either way. The
+// board must not hold the hook open for a decision nobody can make, nor offer
+// an approve/deny modal that would not answer anything.
+func (p payload) asksQuestion() bool {
+	return p.HookEventName == "PermissionRequest" && p.ToolName == "AskUserQuestion"
+}
+
 // clearsBlock reports whether an event may move a blocked session. Parallel
 // subagent tool traffic must not clear a permission dialog that is still open.
 //

@@ -10,6 +10,7 @@ import (
 	"github.com/google/uuid"
 
 	"github.com/ayan-de/agent-board/internal/activity"
+	"github.com/ayan-de/agent-board/internal/agents"
 	"github.com/ayan-de/agent-board/internal/llm"
 	"github.com/ayan-de/agent-board/internal/store"
 )
@@ -29,7 +30,7 @@ type Service struct {
 	activeSessions map[string]*AgentSession
 	completionCh   chan RunCompletion
 	hookBaseURL    string
-	onLaunch       func(sessionID, launchID, agent string)
+	onLaunch       func(sessionID, launchID string, decisions activity.DecisionCodec)
 }
 
 // AgentSession tracks an active agent session
@@ -68,14 +69,18 @@ func (s *Service) SetHookBaseURL(url string) {
 }
 
 // SetLaunchNotifier is told the launch id of every spawn that gets hook
-// environment, so the receiver can drop reports from an earlier launch.
-func (s *Service) SetLaunchNotifier(f func(sessionID, launchID, agent string)) {
+// environment, so the receiver can drop reports from an earlier launch, and the
+// codec its agent reads a permission decision in.
+func (s *Service) SetLaunchNotifier(f func(sessionID, launchID string, decisions activity.DecisionCodec)) {
 	s.onLaunch = f
 }
 
-// launchSpec is the identity a spawned agent reports back with. The launch id
-// lets the board drop hooks from an earlier launch of the same session, whose
-// late events would otherwise corrupt the current one's state.
+// launchSpec is the identity a spawned agent reports back with, plus whatever
+// that particular agent needs in order to report at all. The launch id lets the
+// board drop hooks from an earlier launch of the same session, whose late
+// events would otherwise corrupt the current one's state.
+//
+// Nothing here knows one agent from another: the catalog does.
 func (s *Service) launchSpec(agent, sessionID, launchID string) ([]string, string) {
 	env := []string{
 		"AGENTBOARD_SESSION_ID=" + sessionID,
@@ -84,24 +89,30 @@ func (s *Service) launchSpec(agent, sessionID, launchID string) ([]string, strin
 	if s.hookBaseURL == "" {
 		return env, ""
 	}
-	if s.onLaunch != nil {
-		s.onLaunch(sessionID, launchID, agent)
-	}
-	hookURL := s.hookBaseURL + "/hooks/" + sessionID
 	env = append(env, "AGENTBOARD_HOOK_URL="+s.hookBaseURL)
 
-	var settings string
-	switch agent {
-	// FreeCode reads its own variable and posts Claude-shaped hook payloads to
-	// this exact per-session URL.
-	case "freecode":
-		env = append(env, "FREECODE_HOOK_URL="+hookURL)
-	// Claude Code takes its hooks per process, so nothing is written into the
-	// ticket worktree and no earlier launch's settings can linger.
-	case "claude-code", "claudecode":
-		settings = activity.ClaudeSettingsJSON(hookURL)
+	desc, known := agents.Lookup(agent)
+	if !known || !desc.Supports(agents.CapActivityReports) {
+		return env, ""
 	}
-	return env, settings
+	if s.onLaunch != nil {
+		s.onLaunch(sessionID, launchID, desc.Decisions)
+	}
+	if desc.Provision == nil {
+		return env, ""
+	}
+	launch, err := desc.Provision(agents.Provision{
+		SessionID: sessionID,
+		LaunchID:  launchID,
+		HookBase:  s.hookBaseURL,
+		CacheDir:  cacheDir(),
+	})
+	// A provisioning failure costs the board its reports, not the run: the
+	// agent still spawns, and its state falls back to the pane monitor.
+	if err != nil {
+		return env, ""
+	}
+	return append(env, launch.Env...), launch.Settings
 }
 
 func (s *Service) SetWorktrees(w Worktrees) {

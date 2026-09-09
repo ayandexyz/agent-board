@@ -82,6 +82,7 @@ func runTUI() int {
 	}
 
 	var resolvePermission func(sessionID, decision string)
+	var activityAlerts <-chan activity.Alert
 	recv := activity.New()
 	recv.Label = orch.WindowForSession
 	if base, err := recv.Start(); err != nil {
@@ -91,6 +92,11 @@ func runTUI() int {
 		orch.SetHookBaseURL(base)
 		orch.SetLaunchNotifier(recv.Launch)
 		resolvePermission = func(sessionID, decision string) { recv.Resolve(sessionID, decision) }
+		// One subscription per consumer: the TUI's stream is its own, so an
+		// API or push client added later takes nothing away from it.
+		alerts, unsubscribe := recv.Subscribe()
+		defer unsubscribe()
+		activityAlerts = alerts
 	}
 
 	g := git.New(git.ExecRunner())
@@ -123,7 +129,7 @@ func runTUI() int {
 
 	app, err := tui.NewApp(cfg, s, reg, tui.AppDeps{
 		Orchestrator:      orch,
-		ActivityEvents:    recv.Events(),
+		ActivityEvents:    activityAlerts,
 		ResolvePermission: resolvePermission,
 		CurrentBranch:     currentBranch,
 	})

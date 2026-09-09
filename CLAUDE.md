@@ -70,6 +70,10 @@ agent-board/
 │   │   ├── decomposer.go   # Project → tickets decomposition engine
 │   │   ├── assigner.go     # Auto-assign tickets to agents with reasoning
 │   │   └── prompts.go      # Prompt templates for decomposition and assignment
+│   ├── agents/             # Catalog of coding agents — one file per agent
+│   │   ├── agents.go       # Capability, Descriptor, Register/Lookup registry
+│   │   ├── catalog.go      # The list of agents that exist, in picker order
+│   │   └── claude.go …     # One descriptor per agent (opencode, freecode, …)
 │   ├── apitypes/           # Shared API types (DTOs)
 │   │   ├── ticket.go       # Ticket DTOs
 │   │   ├── session.go      # Session DTOs
@@ -239,15 +243,36 @@ When viewing dashboard with active sessions ([app.go:474-502](internal/tui/app.g
 
 ---
 
-## Agent Activity Tracking (in progress)
+## Agent Activity Tracking
+
+Implemented for Claude Code, FreeCode and OpenCode.
 
 Spawned agents report their own state over HTTP rather than the board guessing from the screen.
 
-`internal/activity` is the receiver: a loopback `net/http` server on `127.0.0.1:0`, started in `runTUI` and handed to the orchestrator via `SetHookBaseURL`. It accepts `POST /hooks/{sessionID}` carrying Claude-Code-shaped hook JSON, maps it to a state (`active`, `idle`, `waiting_input`, `blocked`, `exited`), and fires one `notify-send` on entry into the needs-input family. The alert body is `toolDetail` in `internal/activity/detail.go`: the question for `AskUserQuestion`, the command for `Bash`, the path for a file edit, and the bare tool name for anything unlisted — never a dump of `tool_input`. A permission request naming `AskUserQuestion` is `waiting_input`, not `blocked`; what is waiting is an answer, not an approval. `X-Agentboard-Launch` is checked against the launch id recorded at spawn, so a relaunched session's late hooks are dropped.
+`internal/activity` is the receiver: a loopback `net/http` server on `127.0.0.1:0`, started in `runTUI` and handed to the orchestrator via `SetHookBaseURL`. It accepts `POST /hooks/{sessionID}` carrying Claude-Code-shaped hook JSON, maps it to a state (`active`, `idle`, `waiting_input`, `blocked`, `exited`), and fires one `notify-send` on entry into the needs-input family. The alert body is `toolDetail` in `internal/activity/detail.go`: the question for `AskUserQuestion`, the command for `Bash`, the path for a file edit, and the bare tool name for anything unlisted — never a dump of `tool_input`. A permission request naming `AskUserQuestion` is `waiting_input`, not `blocked`; what is waiting is an answer, not an approval. It is also never held open or marked `Decidable` — allowing it would only let the agent ask, and the answer is typed in the pane regardless — so Claude Code's questions raise the same in-app notification OpenCode's and FreeCode's do, rather than an approve/deny modal that would answer nothing. `X-Agentboard-Launch` is checked against the launch id recorded at spawn, so a relaunched session's late hooks are dropped.
 
-`PermissionRequest` is held open (10 minutes by default, `Receiver.PermissionTimeout`) while the board asks: the alert is flagged `Decidable`, the TUI raises an approval modal instead of a toast, and `Receiver.Resolve(sessionID, decision)` writes the reply — nested `{"behavior":...}` for Claude Code, a bare string for FreeCode, chosen from the agent recorded at `Launch`. Cancelling the modal denies; a timeout answers `{}` and the pane picker takes over.
+`PermissionRequest` is held open (10 minutes by default, `Receiver.PermissionTimeout`) while the board asks: the alert is flagged `Decidable`, the TUI raises an approval modal instead of a toast, and `Receiver.Resolve(sessionID, decision)` writes the reply — nested `{"behavior":...}` for Claude Code and OpenCode, a bare string for FreeCode, through the `activity.DecisionCodec` recorded at `Launch`. Cancelling the modal denies; a timeout answers `{}` and the pane picker takes over. The receiver never names an agent: a nil codec simply means nobody can be answered over the wire.
 
-Not built yet: the store migration, the event hub, the tool-flight rule beyond "any PostToolUse clears the block", the TUI glyph/waiting overlay, and the capture-pane reconciler.
+### The agent catalog
+
+`internal/agents` is the one place that knows one agent from another. Each agent is a `Descriptor` in its own file — name, binary, whether it is offered in the picker, its logo and colour, its resume pattern, the capabilities the board may exercise, its `activity.DecisionCodec`, and a `Provision` func that wires one spawn up to the receiver. `catalog.go` lists them in the order they are offered; `Register` panics at startup on a contradictory descriptor (claiming remote permissions with no codec, provisioning reporting it never claimed) rather than failing silently at the moment a user is waiting on a modal.
+
+Adding an agent is adding one file and one line in `catalog.go`. `config.DetectAgents`, `orchestrator.ExtractResumeCommand` and `Service.launchSpec` all read the catalog, so none of them grows a case.
+
+Capabilities are added only when something branches on them. Today:
+
+| Capability | What branches on it |
+|---|---|
+| `activity.reports` | `launchSpec` provisions and notifies the receiver only for agents that report |
+| `permission.remote` | must agree with the presence of a decision codec; enforced at `Register` |
+
+Deliberately not yet declared, because nothing reads them: `lifecycle.session_end` (OpenCode reports no exit, so only the pane monitor notices) and `tool.flight_ids` (no `tool_use_id` means any `PostToolUse` clears a permission block, not just the one that raised it).
+
+### The alert hub
+
+`Receiver.Subscribe()` returns a stream of alerts and a cancel func. Every subscriber gets its own `eventBuffer`-deep channel and sees every alert raised after it subscribed, so the TUI, an API websocket and a push bridge never take alerts from one another — which a single shared channel did. Sends are non-blocking and drop on overflow: a missed toast costs a notification, a blocked hook stalls the agent. Cancel closes the stream (idempotent), and `Receiver.Close` ends every subscription so readers unblock.
+
+Not built yet: the store migration, the tool-flight rule beyond "any PostToolUse clears the block", the TUI glyph/waiting overlay, and the capture-pane reconciler.
 
 Every agent pane is launched with its session identity exported via `tmux new-window -e`:
 
@@ -257,6 +282,7 @@ Every agent pane is launched with its session identity exported via `tmux new-wi
 | `AGENTBOARD_LAUNCH_ID` | Per-spawn id; lets the board drop hooks from an earlier launch of the same session |
 | `AGENTBOARD_HOOK_URL` | Base URL of the board's local hook receiver |
 | `FREECODE_HOOK_URL` | FreeCode only: `<base>/hooks/<sessionID>` |
+| `OPENCODE_CONFIG` | OpenCode only: path to the config document that loads the board's reporting plugin |
 
 Claude Code takes no environment variable of its own. It is launched as
 `claude --settings ~/.agentboard/cache/settings-<sessionID>.json`, whose
@@ -277,11 +303,40 @@ two agents disagree on the reply shape: Claude Code wants
 `decision: "allow"`. `PermissionRequest` from Claude Code carries no
 `tool_use_id`.
 
-The document reaches the pane through `RunRequest.Settings`; `launchArgs` in
+The document reaches the pane through `RunRequest.Settings`, built by the
+agent's `Provision` in `internal/agents/claude.go`; `launchArgs` in
 `internal/orchestrator/pty_runner.go` caches it and `agentCommand` quotes the
 path into the launch line.
 
 Nothing is exported unless `Service.SetHookBaseURL` was called, so an agent is never told to reach a receiver that is not running.
+
+OpenCode has no settings flag of its own, so the board ships the reporter as an
+OpenCode plugin: `internal/activity/opencode_plugin.mjs`, embedded in the binary
+and written by `activity.OpenCodeConfig` to
+`~/.agentboard/cache/opencode-plugin.mjs` alongside a one-key config document
+(`plugin: ["file://<that path>"]`) named by `OPENCODE_CONFIG`. OpenCode merges
+plugin lists across config sources, so the user's own plugins survive. Neither
+file is per session — the plugin reads `AGENTBOARD_SESSION_ID`,
+`AGENTBOARD_LAUNCH_ID` and `AGENTBOARD_HOOK_URL` from its pane and stays inert
+without them.
+
+The plugin posts Claude-Code-shaped payloads, so there is no OpenCode mapper in
+Go: `chat.message` as `UserPromptSubmit`, `tool.execute.before`/`after` as
+`PreToolUse`/`PostToolUse` (`tool_use_id` = OpenCode's `callID`), `session.idle`
+as `Stop`, `question.asked` as an `agent_needs_input` notification carrying the
+event's own `questions` array (already the shape `toolDetail` reads for
+`AskUserQuestion`, so the alert quotes the question), and `permission.asked` as
+a `PermissionRequest` it awaits. `allow`
+replies become `POST /session/{id}/permissions/{permissionID}` with `once`,
+`deny` becomes `reject`, and no decision leaves the pane picker to the user. It
+reads either decision shape, nested or bare. Questions are answered in the pane
+— OpenCode exposes no remote reply for them — and OpenCode emits no session-end
+event, so process exit is still detected by the pane monitor.
+
+`internal/activity/opencode_plugin_probe.mjs` drives the plugin without
+OpenCode, so a test can feed it one event and watch what reaches the receiver.
+Note the `question` tool is gated behind `OPENCODE_ENABLE_QUESTION_TOOL` and is
+not offered in headless `opencode run`.
 
 FreeCode support lives in the FreeCode repo at `apps/core/src/hooks/builtin/board-webhook.ts`, registered from `initHooks`. It posts Claude Code shaped hook payloads (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`) so the board needs no FreeCode-specific mapper, and it answers permission requests remotely: a reply of `{"hookSpecificOutput":{"decision":"allow"}}` resolves the agent's pending prompt as a one-shot grant, `deny` rejects it, and no decision leaves the choice to the pane picker.
 
@@ -414,6 +469,7 @@ Backlog -> In Progress            -> Review              -> Done
 | `AGENTBOARD_LAUNCH_ID` | set by board | Exported into each agent pane; per-spawn generation id |
 | `AGENTBOARD_HOOK_URL` | set by board | Exported into each agent pane; base URL of the hook receiver |
 | `FREECODE_HOOK_URL` | set by board | Exported for freecode agents; per-session hook endpoint |
+| `OPENCODE_CONFIG` | set by board | Exported for opencode agents; config that loads the board's reporting plugin |
 | `AGENTBOARD_NPM_PATH` | `npm` | Path to npm binary (for MCP servers) |
 | `AGENTBOARD_NODE_PATH` | `node` | Path to node binary (for MCP servers) |
 | `NO_COLOR` | — | Disable colored output (respects standard env var) |

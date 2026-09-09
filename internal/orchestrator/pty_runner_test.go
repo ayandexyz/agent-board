@@ -554,3 +554,40 @@ esac
 		t.Fatalf("Start() never injected the ticket prompt into claude:\n%s", log)
 	}
 }
+
+// The prompt file is what gets typed into the agent's composer, so it must
+// hold the user's prompt and nothing else: no done marker, no ticket header.
+func TestPtyRunnerWritesPromptVerbatim(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-test,123,0")
+	homeDir := t.TempDir()
+	t.Setenv("HOME", homeDir)
+
+	tmuxDir := t.TempDir()
+	t.Setenv("FAKE_TMUX_LOG", filepath.Join(tmuxDir, "tmux.log"))
+	t.Setenv("PATH", tmuxDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	fakeTmux := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$FAKE_TMUX_LOG\"\ncase \"$1\" in new-window) printf '%%42\\n';; list-panes) exit 1;; esac\n"
+	if err := os.WriteFile(filepath.Join(tmuxDir, "tmux"), []byte(fakeTmux), 0755); err != nil {
+		t.Fatalf("write fake tmux: %v", err)
+	}
+
+	runner, err := NewTmuxAgentRunner("agentboard")
+	if err != nil {
+		t.Fatalf("NewTmuxAgentRunner() error = %v", err)
+	}
+	const want = "ask me a random quiz using question tool"
+	if _, err := runner.Start(testCtx(t), RunRequest{
+		SessionID: "session-12345678",
+		Agent:     "opencode",
+		Prompt:    want,
+	}); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	raw, err := os.ReadFile(filepath.Join(homeDir, ".agentboard", "cache", "prompt-session-12345678.txt"))
+	if err != nil {
+		t.Fatalf("read prompt file: %v", err)
+	}
+	if string(raw) != want {
+		t.Errorf("prompt file = %q, want %q", raw, want)
+	}
+}
