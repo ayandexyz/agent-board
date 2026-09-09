@@ -587,10 +587,8 @@ func (m TicketViewModel) handleViewKey(msg tea.KeyMsg) (TicketViewModel, tea.Cmd
 					}
 				}
 			}
-			prompt := fmt.Sprintf("Ticket: %s\nTitle: %s\nPrompt: %s",
-				m.ticket.ID, m.ticket.Title, m.ticket.Prompt)
 			return m, func() tea.Msg {
-				return directRunStartedMsg{ticketID: m.ticket.ID, agent: m.ticket.Agent, prompt: prompt}
+				return directRunStartedMsg{ticketID: m.ticket.ID, agent: m.ticket.Agent, prompt: m.buildPromptFromTicket()}
 			}
 		}
 	}
@@ -983,7 +981,9 @@ func (m TicketViewModel) buildPromptFromTicket() string {
 	if m.ticket == nil {
 		return ""
 	}
-	return fmt.Sprintf("Ticket: %s\nTitle: %s\nPrompt: %s", m.ticket.ID, m.ticket.Title, m.ticket.Prompt)
+	// The agent gets the prompt the user wrote, nothing else. The ticket id and
+	// title are board bookkeeping and only crowd the agent's composer.
+	return m.ticket.Prompt
 }
 
 func (m TicketViewModel) SetTicket(t *store.Ticket) TicketViewModel {

@@ -91,14 +91,10 @@ func (r *tmuxAgentRunner) Start(ctx context.Context, req RunRequest) (RunHandle,
 	_ = exec.Command("tmux", "set-option", "-p", "-t", paneID, "remain-on-exit", "on").Run()
 
 	cfg := pty.GetConfig(req.Agent)
-	formattedPrompt := req.Prompt
-	if cfg != nil && cfg.FormatPrompt != nil {
-		formattedPrompt = cfg.FormatPrompt(req.Prompt)
-	}
 
 	cache := cacheDir()
 	promptFile := fmt.Sprintf("%s/prompt-%s.txt", cache, req.SessionID)
-	if err := os.WriteFile(promptFile, []byte(formattedPrompt), 0644); err != nil {
+	if err := os.WriteFile(promptFile, []byte(req.Prompt), 0644); err != nil {
 		return RunHandle{}, fmt.Errorf("write prompt file: %w", err)
 	}
 
