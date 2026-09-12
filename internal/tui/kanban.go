@@ -52,6 +52,7 @@ type KanbanModel struct {
 	columnDefs      []config.Column
 	styles          KanbanStyles
 	animFrame       int
+	tickArmed       bool
 	theme           *theme.Theme
 	tab             KanbanTab
 	searchQuery     string
@@ -178,11 +179,9 @@ func (m KanbanModel) Update(msg tea.Msg) (KanbanModel, tea.Cmd) {
 	case tea.KeyMsg:
 		return m.handleKey(msg)
 	case tickMsg:
+		m.tickArmed = false
 		m.animFrame = (m.animFrame + 1) % AnimFrames
-		if m.anyAgentActive() {
-			return m, animationTick()
-		}
-		return m, nil
+		return m, m.armTick()
 	case searchResultsMsg:
 		m.columns = groupByStatusDynamic(msg.tickets, m.columnDefs)
 		return m, nil
@@ -642,6 +641,14 @@ func (m KanbanModel) anyAgentActive() bool {
 
 func (m KanbanModel) NeedsTick() bool {
 	return m.anyAgentActive()
+}
+
+func (m *KanbanModel) armTick() tea.Cmd {
+	if m.tickArmed || !m.anyAgentActive() {
+		return nil
+	}
+	m.tickArmed = true
+	return animationTick()
 }
 
 func (m KanbanModel) debouncedSearch() tea.Cmd {

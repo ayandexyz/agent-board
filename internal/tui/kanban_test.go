@@ -614,3 +614,43 @@ func TestKanbanMonthNavigation(t *testing.T) {
 		t.Errorf("monthOffset = %d, want 0", m.monthOffset)
 	}
 }
+
+func TestKanbanTickRearmsOnlyWhileActive(t *testing.T) {
+	m := newTestKanban(t)
+	ctx := context.Background()
+
+	ticket, err := m.store.CreateTicket(ctx, store.Ticket{Title: "active", Status: "in_progress"})
+	if err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	_ = m.store.SetAgentActive(ctx, ticket.ID, true)
+	m, _ = m.Reload()
+
+	if cmd := m.armTick(); cmd == nil {
+		t.Fatal("armTick should schedule a tick when an agent is active")
+	}
+	if cmd := m.armTick(); cmd != nil {
+		t.Fatal("armTick scheduled a second loop while one was in flight")
+	}
+
+	m, cmd := m.Update(tickMsg{})
+	if cmd == nil {
+		t.Fatal("tick should re-arm while an agent is active")
+	}
+	if m.animFrame != 1 {
+		t.Errorf("animFrame = %d, want 1 after one tick", m.animFrame)
+	}
+	if cmd := m.armTick(); cmd != nil {
+		t.Fatal("armTick scheduled a second loop after the tick re-armed")
+	}
+
+	_ = m.store.SetAgentActive(ctx, ticket.ID, false)
+	m, _ = m.Reload()
+	m, cmd = m.Update(tickMsg{})
+	if cmd != nil {
+		t.Fatal("tick should not re-arm once no agent is active")
+	}
+	if cmd := m.armTick(); cmd != nil {
+		t.Fatal("armTick should be nil when no agent is active")
+	}
+}

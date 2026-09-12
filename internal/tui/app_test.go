@@ -782,3 +782,62 @@ func TestEscFromHelpRearmsTickWhenAgentActive(t *testing.T) {
 		t.Errorf("toggle produced %T, want tickMsg", msg)
 	}
 }
+
+func TestTickCmdArmsOnlyOneLoopAtATime(t *testing.T) {
+	app, _ := newTestApp(t)
+	ctx := context.Background()
+
+	ticket, _ := app.store.CreateTicket(ctx, store.Ticket{Title: "active", Status: "in_progress"})
+	_ = app.store.SetAgentActive(ctx, ticket.ID, true)
+	app.kanban, _ = app.kanban.Reload()
+
+	if cmd := app.tickCmd(); cmd == nil {
+		t.Fatal("first tickCmd should arm the loop")
+	}
+	if cmd := app.tickCmd(); cmd != nil {
+		t.Fatal("second tickCmd armed another loop while one was in flight")
+	}
+	if _, cmd := app.Update(tea.FocusMsg{}); cmd != nil {
+		t.Fatal("unhandled message armed another loop while one was in flight")
+	}
+
+	_, cmd := app.Update(tickMsg{})
+	if cmd == nil {
+		t.Fatal("tick should re-arm the loop while an agent is active")
+	}
+	if _, ok := cmd().(tickMsg); !ok {
+		t.Fatalf("tick re-armed with %T, want tickMsg", cmd())
+	}
+	if cmd := app.tickCmd(); cmd != nil {
+		t.Fatal("tickCmd armed a second loop right after the tick re-armed")
+	}
+}
+
+func TestRunStartedDoesNotArmSecondLoop(t *testing.T) {
+	app, fo := newTestApp(t)
+	ctx := context.Background()
+
+	ticket, _ := app.store.CreateTicket(ctx, store.Ticket{Title: "Work", Status: "in_progress", Agent: "claude-code"})
+	proposal, _ := app.store.CreateProposal(ctx, store.Proposal{TicketID: ticket.ID, Status: "approved", Prompt: "p"})
+	_ = app.store.SetAgentActive(ctx, ticket.ID, true)
+	app.kanban, _ = app.kanban.Reload()
+
+	if cmd := app.tickCmd(); cmd == nil {
+		t.Fatal("precondition: tick loop should be armed")
+	}
+
+	_, cmd := app.Update(runStartedMsg{proposalID: proposal.ID})
+	batch, ok := cmd().(tea.BatchMsg)
+	if !ok {
+		t.Fatalf("runStartedMsg produced %T, want tea.BatchMsg", cmd())
+	}
+	for _, c := range batch {
+		if c == nil {
+			continue
+		}
+		if _, ok := c().(tickMsg); ok {
+			t.Fatal("runStartedMsg armed a second tick loop while one was in flight")
+		}
+	}
+	fo.completeRun(ticket.ID, "", "completed")
+}

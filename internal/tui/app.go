@@ -424,8 +424,8 @@ func (a *App) Init() tea.Cmd {
 	// Always arm the animation tick at startup. The kanban only advances
 	// its animFrame when an agent is active, so idle ticks are cheap.
 	cmds := []tea.Cmd{tea.EnterAltScreen}
-	if a.kanban.NeedsTick() {
-		cmds = append(cmds, animationTick())
+	if c := a.tickCmd(); c != nil {
+		cmds = append(cmds, c)
 	}
 	if c := a.waitForActivityCmd(); c != nil {
 		cmds = append(cmds, c)
@@ -658,17 +658,11 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 
-	if a.kanban.NeedsTick() {
-		return a, animationTick()
-	}
-	return a, nil
+	return a, a.tickCmd()
 }
 
 func (a *App) tickCmd() tea.Cmd {
-	if a.kanban.NeedsTick() {
-		return animationTick()
-	}
-	return nil
+	return a.kanban.armTick()
 }
 
 func (a *App) loadProposalCmd(ticketID string) tea.Cmd {
