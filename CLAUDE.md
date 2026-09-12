@@ -59,7 +59,8 @@ agent-board/
 │   ├── api/                # Loopback HTTP API over the orchestrator
 │   │   ├── server.go       # Server, Board/Activity interfaces, loopback guard
 │   │   ├── handlers.go     # REST handlers under /api/v1
-│   │   └── events.go       # Event hub and SSE /events stream
+│   │   ├── events.go       # Event hub and SSE /events stream
+│   │   └── terminal.go     # WebSocket terminal over a tmux viewer session
 │   ├── store/              # SQLite persistence
 │   │   ├── sqlite.go       # DB connection, initialization, migrations
 │   │   ├── tickets.go      # Ticket CRUD operations
@@ -100,7 +101,7 @@ agent-board/
 | **modernc.org/sqlite over CGO sqlite** | Pure Go, compiles on Termux (Android ARM64) without a C toolchain. Opened in WAL mode with a 5 s busy timeout (`store.dsn`) so a CLI command and the TUI can share the file. |
 | **stdlib `http.ServeMux` over chi** | Go 1.22 method+path patterns cover every route; no extra dependency for Termux builds. |
 | **Container / presentation** | `orchestrator.Service` is the one container: every rule (first-column create, branch-mode switch, status moves, merges) lives there. `internal/tui` and `internal/api` are two presentations of it and hold no `*store.Store`. A rule that only one front end knows is a bug. |
-| **API binds loopback only** | `api.Server.Start` refuses a non-loopback address. A phone reaches it over an SSH port forward or a tailnet, so the API needs no auth of its own. |
+| **API binds loopback only** | `api.Server.Start` refuses a non-loopback address. A phone reaches it through `tailscale serve` (or an SSH forward), so the API needs no auth of its own. |
 | **bubbletea + custom pane over pure tmux** | Toggle between tmux-managed panes (for existing tmux users) and embedded PTY panes (for standalone usage). User chooses at startup. |
 | **TOML config + env vars** | TOML for persistent user preferences; env vars for CI/overrides. Env vars take precedence. |
 | **Error wrapping with `fmt.Errorf("context: %w", err)`** | Consistent error chain for debugging. Every package wraps errors at boundary points. |
@@ -411,6 +412,22 @@ Routes, all under `/api/v1`:
 | `GET /sessions/{id}/screen?lines=` | `capture-pane` text |
 | `POST /sessions/{id}/stop` · `/input` `{text}` · `/resolve` `{decision}` | stop, type into the pane (refused `409` while blocked/exited), answer a held permission |
 | `GET /events?after=<seq>` | SSE stream |
+| `GET /terminal?cols=&rows=` · `GET /sessions/{id}/terminal` | WebSocket: PTY bytes out as binary frames, keystrokes in as binary, `{"type":"resize","cols","rows"}` as text |
+
+The terminal routes attach a **viewer**: `tmux.Attach` creates a grouped
+session (`<session>-view-<rand>`) on the board's tmux session, selects the
+agent's window in it, and attaches inside a PTY. Grouped, not shared, so a
+phone switching windows or resizing never moves or shrinks the desktop
+TUI. Closing the socket kills the viewer session only.
+
+Every request carrying an `Origin` header is refused with 403: a page in
+the user's desktop browser could otherwise POST to the loopback API.
+Native apps, curl and SSH forwards send no Origin. A browser front end
+will need an allowlist there, not the removal of the check.
+
+To reach the API from a phone, publish the loopback port to the tailnet:
+`tailscale serve --bg 7878`. Tailscale terminates HTTPS and the tailnet
+ACL is the auth; the server still binds loopback only.
 
 Errors map sentinels to status codes: `store.ErrNotFound` 404;
 `ErrInvalidStatus`, `ErrInvalidPriority`, `ErrTitleRequired`,
@@ -428,9 +445,10 @@ event or on an interval. A reconnecting client sends `?after=` or
 `Last-Event-ID`; older than the ring it must refetch the board.
 
 Not built yet: a headless `agentboard serve` for machines with no TUI,
-TUI-side mutations on the stream, and push notifications (SSH cannot wake
-a phone in the background; see
-`docs/superpowers/specs/2026-09-12-mobile-client-design.md`).
+TUI-side mutations on the stream, and push notifications for a phone in
+the background. The mobile client is the Expo app in
+`~/Projects/AIChat`; see
+`docs/superpowers/specs/2026-09-12-mobile-client-design.md`.
 
 ---
 
