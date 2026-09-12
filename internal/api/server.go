@@ -115,6 +115,7 @@ func (s *Server) Start() (string, error) {
 	if addr == "" {
 		addr = DefaultAddr
 	}
+	addr = loopbackAddr(addr)
 	if err := requireLoopback(addr); err != nil {
 		return "", err
 	}
@@ -163,6 +164,17 @@ func (s *Server) Close() error {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 	return s.srv.Shutdown(ctx)
+}
+
+// loopbackAddr turns a bare ":port" (older configs wrote addr = ":8080")
+// into 127.0.0.1:port. An empty host would mean every interface, and the
+// API never listens there.
+func loopbackAddr(addr string) string {
+	host, port, err := net.SplitHostPort(addr)
+	if err != nil || host != "" {
+		return addr
+	}
+	return net.JoinHostPort("127.0.0.1", port)
 }
 
 func requireLoopback(addr string) error {

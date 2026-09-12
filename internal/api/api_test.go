@@ -443,6 +443,18 @@ func TestStartRefusesNonLoopback(t *testing.T) {
 	}
 }
 
+func TestStartTreatsBarePortAsLoopback(t *testing.T) {
+	s := &api.Server{Addr: ":0", Board: newFakeBoard()}
+	base, err := s.Start()
+	if err != nil {
+		t.Fatalf("a bare :port should bind loopback, got %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	if !strings.HasPrefix(base, "http://127.0.0.1:") {
+		t.Errorf("base = %q", base)
+	}
+}
+
 func TestStartBindsLoopbackAndStreamsCompletions(t *testing.T) {
 	b := newFakeBoard()
 	a := &fakeActivity{alerts: make(chan activity.Alert, 4)}
