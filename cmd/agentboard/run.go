@@ -34,7 +34,15 @@ func runTUI() int {
 
 	if !tmux.IsInTmux() {
 		sessionName := cfg.ProjectName
-		cmd := exec.Command("tmux", "new-session", "-A", "-s", sessionName, os.Args[0])
+		setup, attach := tmux.BootstrapCommands(sessionName, os.Args[0],
+			tmux.SessionExists(sessionName), tmux.WindowExists(sessionName, "agentboard"))
+		for _, args := range setup {
+			if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
+				fmt.Fprintf(os.Stderr, "error preparing tmux window: %v: %s\n", err, out)
+				return 1
+			}
+		}
+		cmd := exec.Command(attach[0], attach[1:]...)
 		cmd.Stdin = os.Stdin
 		cmd.Stdout = os.Stdout
 		cmd.Stderr = os.Stderr

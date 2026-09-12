@@ -57,6 +57,42 @@ func GetCurrentPaneID() string {
 	return os.Getenv("TMUX_PANE")
 }
 
+// SessionExists reports whether a tmux session named name is alive.
+func SessionExists(name string) bool {
+	return exec.Command("tmux", "has-session", "-t", name).Run() == nil
+}
+
+// WindowExists reports whether session has a window named window.
+func WindowExists(session, window string) bool {
+	out, err := exec.Command("tmux", "list-windows", "-t", session, "-F", "#{window_name}").Output()
+	if err != nil {
+		return false
+	}
+	for _, line := range strings.Split(strings.TrimSpace(string(out)), "\n") {
+		if line == window {
+			return true
+		}
+	}
+	return false
+}
+
+// BootstrapCommands plans how to get the agentboard binary running inside
+// tmux session name. `tmux new-session -A` only runs binary when the
+// session doesn't exist yet; if it already exists (e.g. left over from a
+// crash, with other windows still alive) -A silently attaches without
+// running anything, so that case instead creates a fresh "agentboard"
+// window before attaching. windowExists true means a live TUI window is
+// already there, so nothing needs to be (re)started.
+func BootstrapCommands(name, binary string, sessionExists, windowExists bool) (setup [][]string, attach []string) {
+	if !sessionExists {
+		return nil, []string{"tmux", "new-session", "-A", "-s", name, binary}
+	}
+	if !windowExists {
+		setup = append(setup, []string{"tmux", "new-window", "-t", name, "-n", "agentboard", binary})
+	}
+	return setup, []string{"tmux", "attach-session", "-t", name}
+}
+
 // GetCurrentSessionName returns the active tmux session name.
 func GetCurrentSessionName() (string, error) {
 	if !IsInTmux() {
