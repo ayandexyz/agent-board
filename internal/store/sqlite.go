@@ -27,17 +27,12 @@ func Open(dbPath string, validStatuses []string, ticketPrefix string) (*Store, e
 		return nil, fmt.Errorf("store.open: creating dir: %w", err)
 	}
 
-	db, err := sql.Open("sqlite", dbPath)
+	db, err := sql.Open("sqlite", dsn(dbPath))
 	if err != nil {
 		return nil, fmt.Errorf("store.open: %w", err)
 	}
 
 	db.SetMaxOpenConns(1)
-
-	if _, err := db.Exec("PRAGMA foreign_keys = ON"); err != nil {
-		db.Close()
-		return nil, fmt.Errorf("store.open: enabling foreign keys: %w", err)
-	}
 
 	s := &Store{db: db, validStatuses: validStatuses, ticketPrefix: ticketPrefix}
 
@@ -55,4 +50,12 @@ func (s *Store) Close() error {
 
 func (s *Store) SetTicketPrefix(prefix string) {
 	s.ticketPrefix = prefix
+}
+
+// dsn opens the database in WAL mode with a busy timeout, so a second
+// agentboard process on the same file — a CLI command while the TUI is up —
+// waits for the write lock instead of failing at once with SQLITE_BUSY. The
+// pragmas ride on the DSN so every connection the pool opens gets them.
+func dsn(path string) string {
+	return "file:" + path + "?_pragma=busy_timeout(5000)&_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)"
 }
