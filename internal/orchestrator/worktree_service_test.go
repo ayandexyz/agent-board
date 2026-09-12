@@ -19,6 +19,7 @@ func (f *recordingAgentRunner) Start(_ context.Context, req orchestrator.RunRequ
 }
 
 func (f *recordingAgentRunner) GetPaneID(_ string) (string, bool) { return "", false }
+func (f *recordingAgentRunner) Kill(_ string) error               { return nil }
 
 func TestStartAdHocRunEnsuresWorktree(t *testing.T) {
 	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01", Title: "T", Status: "in_progress"}}

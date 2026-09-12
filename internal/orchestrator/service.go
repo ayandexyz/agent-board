@@ -43,6 +43,7 @@ type AgentSession struct {
 	PaneID       string
 	WindowID     string
 	WorktreePath string
+	stop         func()
 }
 
 func NewService(store Store, llm LLMClient, runner Runner, ctx ContextCarryProvider) *Service {
@@ -213,7 +214,7 @@ func (s *Service) StartAdHocRun(ctx context.Context, ticketID, agent, prompt str
 			Settings:   settings,
 		})
 	} else {
-		return store.Session{}, fmt.Errorf("no runner configured")
+		err = fmt.Errorf("orchestrator.start: no runner configured")
 	}
 
 	if err != nil {
@@ -232,6 +233,7 @@ func (s *Service) StartAdHocRun(ctx context.Context, ticketID, agent, prompt str
 		StartedAt:    session.StartedAt.Unix(),
 		Status:       "running",
 		WorktreePath: workDir,
+		stop:         handle.Stop,
 	}
 	s.mu.Unlock()
 
@@ -371,7 +373,7 @@ func (s *Service) StartApprovedRun(ctx context.Context, proposalID string) (stor
 			Settings:   settings,
 		})
 	} else {
-		return store.Session{}, fmt.Errorf("no runner configured")
+		err = fmt.Errorf("orchestrator.start: no runner configured")
 	}
 
 	if err != nil {
@@ -388,6 +390,7 @@ func (s *Service) StartApprovedRun(ctx context.Context, proposalID string) (stor
 		StartedAt:    session.StartedAt.Unix(),
 		Status:       "running",
 		WorktreePath: workDir,
+		stop:         handle.Stop,
 	}
 	s.mu.Unlock()
 
@@ -466,13 +469,22 @@ func (s *Service) StopSession(ctx context.Context, sessionID string) error {
 	delete(s.activeSessions, sessionID)
 	s.mu.Unlock()
 
-	// Try to use TmuxRunner's StopPane if available
+	// Cancel the monitor before killing the pane: a monitor that outlives
+	// the pane would see it die and report a completion for a cancelled run.
+	if sess.stop != nil {
+		sess.stop()
+	}
+	if s.agentRunner != nil {
+		_ = s.agentRunner.Kill(sessionID)
+	}
 	if tmuxRunner, ok := s.runner.(*TmuxRunner); ok {
 		_ = tmuxRunner.StopPane(sessionID)
 	}
 
 	_ = s.store.EndSession(ctx, sessionID, "cancelled")
-	_ = s.store.SetAgentActive(ctx, sess.TicketID, false)
+	if sess.TicketID != "" {
+		_ = s.store.SetAgentActive(ctx, sess.TicketID, false)
+	}
 
 	return nil
 }
@@ -521,10 +533,12 @@ func (s *Service) SwitchToPane(sessionID string) error {
 		pm := tmuxRunner.GetPaneManager()
 		return pm.SwitchToPane(sessionID)
 	}
-	// Try PtyRunner
+	// select-window accepts a pane target and brings that pane's window to
+	// the front; select-pane alone would move focus inside a window the
+	// user is not looking at.
 	if s.agentRunner != nil {
 		if paneID, ok := s.agentRunner.GetPaneID(sessionID); ok {
-			return exec.Command("tmux", "select-pane", "-t", paneID).Run()
+			return exec.Command("tmux", "select-window", "-t", paneID).Run()
 		}
 	}
 	return fmt.Errorf("pane switching only available with TmuxRunner or AgentRunner")

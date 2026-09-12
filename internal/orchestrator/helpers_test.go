@@ -20,6 +20,7 @@ type fakeStore struct {
 	lastAgentActive  bool
 	lastContextCarry store.ContextCarry
 	lastSession      store.Session
+	lastEndStatus    string
 	lastEvent        store.Event
 
 	moveStatusErr    error
@@ -61,7 +62,10 @@ func (f *fakeStore) CreateSession(_ context.Context, s store.Session) (store.Ses
 	f.lastSession = s
 	return s, nil
 }
-func (f *fakeStore) EndSession(_ context.Context, _, _ string) error { return nil }
+func (f *fakeStore) EndSession(_ context.Context, _, status string) error {
+	f.lastEndStatus = status
+	return nil
+}
 func (f *fakeStore) HasActiveSession(_ context.Context, _ string) bool {
 	return f.activeSession
 }
@@ -184,6 +188,7 @@ func (f *fakeTmuxRunner) Start(_ context.Context, req orchestrator.RunRequest) (
 }
 
 func (f *fakeTmuxRunner) GetPaneID(_ string) (string, bool) { return "", false }
+func (f *fakeTmuxRunner) Kill(_ string) error               { return nil }
 
 type fakeAsyncTmuxRunner struct {
 	onComplete func(outcome, summary, resumeCommand string)
@@ -195,6 +200,7 @@ func (f *fakeAsyncTmuxRunner) Start(_ context.Context, req orchestrator.RunReque
 }
 
 func (f *fakeAsyncTmuxRunner) GetPaneID(_ string) (string, bool) { return "", false }
+func (f *fakeAsyncTmuxRunner) Kill(_ string) error               { return nil }
 
 type fakeCtx struct{}
 
@@ -213,3 +219,4 @@ func (c *capturingRunner) Start(_ context.Context, req orchestrator.RunRequest) 
 }
 
 func (c *capturingRunner) GetPaneID(_ string) (string, bool) { return "", false }
+func (c *capturingRunner) Kill(_ string) error               { return nil }
