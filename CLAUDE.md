@@ -164,13 +164,30 @@ depends_on  TEXT  (comma-separated ticket ids)
 ### Session
 
 ```
-id          TEXT PRIMARY KEY
-ticket_id   TEXT FK → tickets.id
-agent       TEXT
-started_at  DATETIME
-ended_at    DATETIME
-status      TEXT  (running | completed | failed | cancelled)
-context_key TEXT  (ContextCarry reference)
+id             TEXT PRIMARY KEY
+ticket_id      TEXT FK → tickets.id
+agent          TEXT
+started_at     DATETIME
+ended_at       DATETIME
+status         TEXT  (running | completed | failed | cancelled)
+context_key    TEXT  (ContextCarry reference)
+activity_state TEXT  (active | idle | waiting_input | blocked | exited, '' if never reported)
+activity_at    DATETIME
+launch_id      TEXT  (per-spawn id the agent's hooks must carry)
+```
+
+### PendingRequest
+
+```
+id          TEXT PRIMARY KEY  (e.g. REQ-03)
+session_id  TEXT FK → sessions.id
+ticket_id   TEXT
+kind        TEXT  (permission)
+tool_name   TEXT
+tool_input  TEXT  (raw JSON)
+created_at  DATETIME
+resolved_at DATETIME
+decision    TEXT  (allow | deny | pane | timeout | dropped | abandoned)
 ```
 
 ---
@@ -272,7 +289,13 @@ Deliberately not yet declared, because nothing reads them: `lifecycle.session_en
 
 `Receiver.Subscribe()` returns a stream of alerts and a cancel func. Every subscriber gets its own `eventBuffer`-deep channel and sees every alert raised after it subscribed, so the TUI, an API websocket and a push bridge never take alerts from one another — which a single shared channel did. Sends are non-blocking and drop on overflow: a missed toast costs a notification, a blocked hook stalls the agent. Cancel closes the stream (idempotent), and `Receiver.Close` ends every subscription so readers unblock.
 
-Not built yet: the store migration, the tool-flight rule beyond "any PostToolUse clears the block", the TUI glyph/waiting overlay, and the capture-pane reconciler.
+### Persistence
+
+The receiver writes through to the store when `Receiver.Store` is set (`run.go` sets it to the SQLite store): `Launch` records `sessions.launch_id`, every accepted signal records `sessions.activity_state` and `activity_at`, and a held `PermissionRequest` becomes a row in `pending_requests` (`REQ-NN`, tool name and raw `tool_input`) that is closed with the decision it got — `allow`, `deny`, `pane` when the board handed the choice back, `timeout` when the hold expired, `dropped` when the agent hung up first. Writes are best effort: a hook never stalls on the database and in-memory state stays authoritative for the running process.
+
+`Receiver.Restore`, called before `Start`, loads the last known state and launch id of every session that has not ended, so a restarted board still shows which agents were blocked, and closes any request left open as `abandoned` — the hook that held it died with the previous process. Note that the receiver binds a fresh port on every start, so agents launched by a previous board process cannot reach the new one; their restored state is the last thing the old process heard.
+
+Not built yet: the tool-flight rule beyond "any PostToolUse clears the block", the TUI glyph/waiting overlay, and the capture-pane reconciler.
 
 Every agent pane is launched with its session identity exported via `tmux new-window -e`:
 

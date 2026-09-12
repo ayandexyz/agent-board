@@ -41,6 +41,10 @@ type Receiver struct {
 	// for a human. On expiry the agent gets no decision and falls back to its
 	// own pane picker.
 	PermissionTimeout time.Duration
+	// Store, when set, receives every launch id, state change and held
+	// request, so the board can show what its agents were doing across a
+	// restart. Nil keeps everything in memory.
+	Store Store
 
 	mu       sync.Mutex
 	sessions map[string]*Session
@@ -97,10 +101,11 @@ func (r *Receiver) Close() error {
 // answered over the wire, and its requests fall through to its own pane picker.
 func (r *Receiver) Launch(sessionID, launchID string, decisions DecisionCodec) {
 	r.mu.Lock()
-	defer r.mu.Unlock()
 	r.launches[sessionID] = launchID
 	r.decisions[sessionID] = decisions
 	delete(r.sessions, sessionID)
+	r.mu.Unlock()
+	r.persistLaunch(sessionID, launchID)
 }
 
 // Forget drops a session, e.g. when its run completes.
@@ -166,12 +171,20 @@ func (r *Receiver) servePermission(w http.ResponseWriter, req *http.Request, ses
 		_, _ = w.Write([]byte("{}"))
 		return
 	}
+	reqID := r.openRequest(sessionID, p)
 
 	var decision string
 	select {
 	case decision = <-pend.decision:
+		recorded := decision
+		if recorded == "" {
+			recorded = DecisionPane
+		}
+		r.closeRequest(reqID, recorded)
 	case <-time.After(r.PermissionTimeout):
+		r.closeRequest(reqID, DecisionTimeout)
 	case <-req.Context().Done():
+		r.closeRequest(reqID, DecisionDropped)
 		return
 	}
 
@@ -215,6 +228,7 @@ func (r *Receiver) apply(sessionID, launchID string, p payload) bool {
 	_, decidable := r.pending[sessionID]
 	r.mu.Unlock()
 
+	r.persistState(sessionID, next)
 	if !entered {
 		return true
 	}
