@@ -41,14 +41,14 @@ func newTestTicketView(t *testing.T) (TicketViewModel, *store.Store) {
 		{Name: "codex", LogoClr: "#10A37F"},
 		{Name: "cursor", LogoClr: "#F0DB4F"},
 	}
-	m := NewTicketViewModel(s, resolver, defaultTheme, testAgents)
+	m := NewTicketViewModel(newFakeOrchestrator(s), resolver, defaultTheme, testAgents)
 	return m, s
 }
 
 func TestNewTicketViewModel(t *testing.T) {
 	m, _ := newTestTicketView(t)
 
-	if m.store == nil {
+	if m.board == nil {
 		t.Error("store is nil")
 	}
 	if m.resolver == nil {
@@ -341,7 +341,7 @@ func TestTicketViewModelEditBackspace(t *testing.T) {
 	m, _ := newTestTicketView(t)
 	ctx := context.Background()
 
-	ticket, _ := m.store.CreateTicket(ctx, store.Ticket{
+	ticket, _ := m.testStore().CreateTicket(ctx, store.Ticket{
 		Title:  "Hello",
 		Status: "backlog",
 	})
@@ -412,7 +412,7 @@ func TestTicketViewModelEscReturnsToViewMode(t *testing.T) {
 	m, _ := newTestTicketView(t)
 	ctx := context.Background()
 
-	ticket, _ := m.store.CreateTicket(ctx, store.Ticket{
+	ticket, _ := m.testStore().CreateTicket(ctx, store.Ticket{
 		Title:  "Esc Test",
 		Status: "backlog",
 	})
@@ -438,7 +438,7 @@ func TestTicketViewModelTagsDisplayed(t *testing.T) {
 	m.viewport.Width = m.width - 6
 	m.viewport.Height = m.height - 7
 
-	ticket, _ := m.store.CreateTicket(ctx, store.Ticket{
+	ticket, _ := m.testStore().CreateTicket(ctx, store.Ticket{
 		Title:  "Tagged",
 		Status: "backlog",
 		Tags:   []string{"auth", "api"},
@@ -459,7 +459,7 @@ func TestTicketViewModelDependsOnDisplayed(t *testing.T) {
 	m.viewport.Width = m.width - 6
 	m.viewport.Height = m.height - 7
 
-	ticket, _ := m.store.CreateTicket(ctx, store.Ticket{
+	ticket, _ := m.testStore().CreateTicket(ctx, store.Ticket{
 		Title:     "Dep Test",
 		Status:    "backlog",
 		DependsOn: []string{"AGT-01", "AGT-02"},
@@ -480,7 +480,7 @@ func TestTicketViewModelTimestampsDisplayed(t *testing.T) {
 	m.viewport.Width = m.width - 6
 	m.viewport.Height = m.height - 7
 
-	ticket, _ := m.store.CreateTicket(ctx, store.Ticket{
+	ticket, _ := m.testStore().CreateTicket(ctx, store.Ticket{
 		Title:  "Time Test",
 		Status: "backlog",
 	})

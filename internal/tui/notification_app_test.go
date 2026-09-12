@@ -96,7 +96,7 @@ func TestAppAgentAssignShowsNotification(t *testing.T) {
 	app.Update(tea.WindowSizeMsg{Width: 120, Height: 40})
 	ctx := context.Background()
 
-	ticket, err := app.store.CreateTicket(ctx, store.Ticket{Title: "Assign Me", Status: "backlog"})
+	ticket, err := app.testStore().CreateTicket(ctx, store.Ticket{Title: "Assign Me", Status: "backlog"})
 	if err != nil {
 		t.Fatalf("CreateTicket: %v", err)
 	}

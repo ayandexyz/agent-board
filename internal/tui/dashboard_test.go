@@ -50,12 +50,12 @@ func newTestDashboard(t *testing.T) DashboardModel {
 
 	// Create a fake orchestrator for testing
 	fo := newFakeOrchestrator(s)
-	return NewDashboardModel(s, fo, resolver, agents, testDashboardTheme())
+	return NewDashboardModel(fo, resolver, agents, testDashboardTheme())
 }
 
 func TestNewDashboardModel(t *testing.T) {
 	m := newTestDashboard(t)
-	if m.store == nil {
+	if m.orchestrator == nil {
 		t.Error("store is nil")
 	}
 	if m.resolver == nil {
@@ -153,7 +153,7 @@ func TestDashboardViewNoAgentsFound(t *testing.T) {
 		{Name: "claude-code", Binary: "claude", Found: false},
 	}
 
-	m := NewDashboardModel(s, newFakeOrchestrator(s), resolver, agents, testDashboardTheme())
+	m := NewDashboardModel(newFakeOrchestrator(s), resolver, agents, testDashboardTheme())
 	m.width = 80
 	m.height = 24
 
@@ -235,12 +235,12 @@ func TestDashboardShowsRunningWhenActiveSession(t *testing.T) {
 	m := newTestDashboard(t)
 
 	ctx := context.Background()
-	ticket, err := m.store.CreateTicket(ctx, store.Ticket{Title: "Test task", Status: "in_progress"})
+	ticket, err := m.testStore().CreateTicket(ctx, store.Ticket{Title: "Test task", Status: "in_progress"})
 	if err != nil {
 		t.Fatalf("create ticket: %v", err)
 	}
 
-	_, err = m.store.CreateSession(ctx, store.Session{
+	_, err = m.testStore().CreateSession(ctx, store.Session{
 		TicketID: ticket.ID,
 		Agent:    "opencode",
 		Status:   "running",
@@ -297,12 +297,12 @@ func TestDashboardShowsNotRunningAfterSessionEnds(t *testing.T) {
 	m := newTestDashboard(t)
 
 	ctx := context.Background()
-	ticket, err := m.store.CreateTicket(ctx, store.Ticket{Title: "Done task", Status: "review"})
+	ticket, err := m.testStore().CreateTicket(ctx, store.Ticket{Title: "Done task", Status: "review"})
 	if err != nil {
 		t.Fatalf("create ticket: %v", err)
 	}
 
-	sess, err := m.store.CreateSession(ctx, store.Session{
+	sess, err := m.testStore().CreateSession(ctx, store.Session{
 		TicketID: ticket.ID,
 		Agent:    "opencode",
 		Status:   "running",
@@ -311,7 +311,7 @@ func TestDashboardShowsNotRunningAfterSessionEnds(t *testing.T) {
 		t.Fatalf("create session: %v", err)
 	}
 
-	err = m.store.EndSession(ctx, sess.ID, "completed")
+	err = m.testStore().EndSession(ctx, sess.ID, "completed")
 	if err != nil {
 		t.Fatalf("end session: %v", err)
 	}
@@ -333,12 +333,12 @@ func TestDashboardRefreshLoadsActiveSessions(t *testing.T) {
 	m := newTestDashboard(t)
 
 	ctx := context.Background()
-	ticket, err := m.store.CreateTicket(ctx, store.Ticket{Title: "Active task", Status: "in_progress"})
+	ticket, err := m.testStore().CreateTicket(ctx, store.Ticket{Title: "Active task", Status: "in_progress"})
 	if err != nil {
 		t.Fatalf("create ticket: %v", err)
 	}
 
-	_, err = m.store.CreateSession(ctx, store.Session{
+	_, err = m.testStore().CreateSession(ctx, store.Session{
 		TicketID: ticket.ID,
 		Agent:    "claude",
 		Status:   "running",
@@ -418,7 +418,7 @@ func TestAggregateActiveSessionsEmptyWhenNoAgentsInstalled(t *testing.T) {
 		{Name: "cursor", Binary: "cursor", Found: false},
 	}
 
-	m := NewDashboardModel(s, newFakeOrchestrator(s), resolver, agents, testDashboardTheme())
+	m := NewDashboardModel(newFakeOrchestrator(s), resolver, agents, testDashboardTheme())
 	groups := m.aggregateActiveSessions()
 	if len(groups) != 0 {
 		t.Errorf("expected 0 groups when no agents installed, got %d", len(groups))
@@ -531,20 +531,20 @@ func TestDashboardSidebarHidesIdleAgentsAndShowsCounts(t *testing.T) {
 
 	// Two claude sessions
 	for _, title := range []string{"task a", "task b"} {
-		tk, err := m.store.CreateTicket(ctx, store.Ticket{Title: title, Status: "in_progress"})
+		tk, err := m.testStore().CreateTicket(ctx, store.Ticket{Title: title, Status: "in_progress"})
 		if err != nil {
 			t.Fatalf("create ticket: %v", err)
 		}
-		if _, err := m.store.CreateSession(ctx, store.Session{TicketID: tk.ID, Agent: "claude", Status: "running"}); err != nil {
+		if _, err := m.testStore().CreateSession(ctx, store.Session{TicketID: tk.ID, Agent: "claude", Status: "running"}); err != nil {
 			t.Fatalf("create session: %v", err)
 		}
 	}
 	// One opencode session
-	tk, err := m.store.CreateTicket(ctx, store.Ticket{Title: "task c", Status: "in_progress"})
+	tk, err := m.testStore().CreateTicket(ctx, store.Ticket{Title: "task c", Status: "in_progress"})
 	if err != nil {
 		t.Fatalf("create ticket: %v", err)
 	}
-	if _, err := m.store.CreateSession(ctx, store.Session{TicketID: tk.ID, Agent: "opencode", Status: "running"}); err != nil {
+	if _, err := m.testStore().CreateSession(ctx, store.Session{TicketID: tk.ID, Agent: "opencode", Status: "running"}); err != nil {
 		t.Fatalf("create session: %v", err)
 	}
 
@@ -586,11 +586,11 @@ func TestDashboardContentListsSessionsFilteredBySelectedAgent(t *testing.T) {
 		{"second claude job", "claude"},
 		{"one opencode job", "opencode"},
 	} {
-		tk, err := m.store.CreateTicket(ctx, store.Ticket{Title: spec.title, Status: "in_progress"})
+		tk, err := m.testStore().CreateTicket(ctx, store.Ticket{Title: spec.title, Status: "in_progress"})
 		if err != nil {
 			t.Fatalf("create ticket: %v", err)
 		}
-		if _, err := m.store.CreateSession(ctx, store.Session{TicketID: tk.ID, Agent: spec.agent, Status: "running"}); err != nil {
+		if _, err := m.testStore().CreateSession(ctx, store.Session{TicketID: tk.ID, Agent: spec.agent, Status: "running"}); err != nil {
 			t.Fatalf("create session: %v", err)
 		}
 	}
@@ -622,11 +622,11 @@ func TestDashboardJumpToSession(t *testing.T) {
 	ctx := context.Background()
 
 	for i, agent := range []string{"claude", "claude", "opencode", "opencode", "opencode"} {
-		tk, err := m.store.CreateTicket(ctx, store.Ticket{Title: "task " + string(rune(97+i)), Status: "in_progress"})
+		tk, err := m.testStore().CreateTicket(ctx, store.Ticket{Title: "task " + string(rune(97+i)), Status: "in_progress"})
 		if err != nil {
 			t.Fatalf("create ticket: %v", err)
 		}
-		if _, err := m.store.CreateSession(ctx, store.Session{TicketID: tk.ID, Agent: agent, Status: "running"}); err != nil {
+		if _, err := m.testStore().CreateSession(ctx, store.Session{TicketID: tk.ID, Agent: agent, Status: "running"}); err != nil {
 			t.Fatalf("create session: %v", err)
 		}
 	}
@@ -663,11 +663,11 @@ func TestDashboardHandleKeyJumpsSessionViaKeybinding(t *testing.T) {
 	ctx := context.Background()
 
 	for i, agent := range []string{"claude", "claude", "opencode"} {
-		tk, err := m.store.CreateTicket(ctx, store.Ticket{Title: "task " + string(rune(97+i)), Status: "in_progress"})
+		tk, err := m.testStore().CreateTicket(ctx, store.Ticket{Title: "task " + string(rune(97+i)), Status: "in_progress"})
 		if err != nil {
 			t.Fatalf("create ticket: %v", err)
 		}
-		if _, err := m.store.CreateSession(ctx, store.Session{TicketID: tk.ID, Agent: agent, Status: "running"}); err != nil {
+		if _, err := m.testStore().CreateSession(ctx, store.Session{TicketID: tk.ID, Agent: agent, Status: "running"}); err != nil {
 			t.Fatalf("create session: %v", err)
 		}
 	}
@@ -723,11 +723,11 @@ func TestDashboardReportsRefusedInput(t *testing.T) {
 	m := newTestDashboard(t)
 	fo := m.orchestrator.(*fakeOrchestrator)
 	ctx := context.Background()
-	ticket, err := m.store.CreateTicket(ctx, store.Ticket{Title: "Test task", Status: "in_progress"})
+	ticket, err := m.testStore().CreateTicket(ctx, store.Ticket{Title: "Test task", Status: "in_progress"})
 	if err != nil {
 		t.Fatal(err)
 	}
-	sess, err := m.store.CreateSession(ctx, store.Session{TicketID: ticket.ID, Agent: "opencode", Status: "running"})
+	sess, err := m.testStore().CreateSession(ctx, store.Session{TicketID: ticket.ID, Agent: "opencode", Status: "running"})
 	if err != nil {
 		t.Fatal(err)
 	}

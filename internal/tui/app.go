@@ -134,7 +134,24 @@ type monthNavigateMsg struct {
 	direction int
 }
 
+// Board is the ticket side of the container: every read and write of
+// tickets the views make goes through it, so the rules live in one place
+// for the TUI and any other front end.
+type Board interface {
+	ListTickets(ctx context.Context, f store.TicketFilters) ([]store.Ticket, error)
+	GetTicket(ctx context.Context, id string) (store.Ticket, error)
+	CreateTicket(ctx context.Context, in orchestrator.CreateTicketInput) (store.Ticket, error)
+	UpdateTicket(ctx context.Context, t store.Ticket) (store.Ticket, error)
+	SetBranchMode(ctx context.Context, ticketID, mode string) (store.Ticket, error)
+	SetTicketPrefix(prefix string)
+	ProjectInitDate(ctx context.Context) (time.Time, error)
+	GetProposal(ctx context.Context, id string) (store.Proposal, error)
+	GetActiveProposalForTicket(ctx context.Context, ticketID string) (store.Proposal, error)
+	ListActiveSessions(ctx context.Context) ([]store.Session, error)
+}
+
 type Orchestrator interface {
+	Board
 	CreateProposal(ctx context.Context, input orchestrator.CreateProposalInput) (store.Proposal, error)
 	ApproveProposal(ctx context.Context, proposalID string) error
 	StartApprovedRun(ctx context.Context, proposalID string) (store.Session, error)
@@ -177,7 +194,6 @@ type AppDeps struct {
 }
 
 type App struct {
-	store        *store.Store
 	orchestrator Orchestrator
 	resolver     *keybinding.Resolver
 	config       *config.Config
@@ -213,7 +229,7 @@ type App struct {
 	unsubscribe         func()
 }
 
-func NewApp(cfg *config.Config, s *store.Store, reg *theme.Registry, deps AppDeps) (*App, error) {
+func NewApp(cfg *config.Config, reg *theme.Registry, deps AppDeps) (*App, error) {
 	km := keybinding.DefaultKeyMap()
 	if len(cfg.TUI.Keybindings) > 0 {
 		keybinding.ApplyConfig(&km, cfg.TUI.Keybindings)
@@ -222,12 +238,12 @@ func NewApp(cfg *config.Config, s *store.Store, reg *theme.Registry, deps AppDep
 	resolver := keybinding.NewResolver(km)
 
 	t := reg.Active()
-	kanban, err := NewKanbanModel(s, resolver, t, cfg.Board.Columns)
+	kanban, err := NewKanbanModel(deps.Orchestrator, resolver, t, cfg.Board.Columns)
 	if err != nil {
 		return nil, fmt.Errorf("tui.newApp: %w", err)
 	}
 
-	if initDate, err := s.ProjectInitDate(context.Background()); err == nil {
+	if initDate, err := deps.Orchestrator.ProjectInitDate(context.Background()); err == nil {
 		kanban.projectInitDate = initDate
 		kanban.monthOffset = computeOffsetToContain(time.Now(), initDate)
 		kanban, err = kanban.Reload()
@@ -240,7 +256,6 @@ func NewApp(cfg *config.Config, s *store.Store, reg *theme.Registry, deps AppDep
 	completions, unsubscribe := deps.Orchestrator.SubscribeCompletions()
 
 	a := &App{
-		store:               s,
 		orchestrator:        deps.Orchestrator,
 		activityEvents:      deps.ActivityEvents,
 		resolvePermission:   deps.ResolvePermission,
@@ -252,8 +267,8 @@ func NewApp(cfg *config.Config, s *store.Store, reg *theme.Registry, deps AppDep
 		focus:               focusBoard,
 		view:                viewBoard,
 		kanban:              kanban,
-		ticketView:          NewTicketViewModel(s, resolver, t, agents).SetGitContext(deps.CurrentBranch, cfg.Git.BranchPrefix),
-		dashboard:           NewDashboardModel(s, deps.Orchestrator, resolver, agents, t),
+		ticketView:          NewTicketViewModel(deps.Orchestrator, resolver, t, agents).SetGitContext(deps.CurrentBranch, cfg.Git.BranchPrefix),
+		dashboard:           NewDashboardModel(deps.Orchestrator, resolver, agents, t),
 		generatingProposals: make(map[string]bool),
 		completionCh:        completions,
 		unsubscribe:         unsubscribe,
@@ -504,7 +519,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case proposalApprovedMsg:
 		return a, a.approveProposalCmd(msg.proposalID)
 	case viewProposalFullMsg:
-		p, err := a.store.GetProposal(context.Background(), msg.proposalID)
+		p, err := a.orchestrator.GetProposal(context.Background(), msg.proposalID)
 		if err != nil {
 			return a, nil
 		}
@@ -535,7 +550,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.kanban, _ = a.kanban.Reload()
 		a.refreshActivity()
 		if a.activeTicket != nil && a.activeTicket.ID == msg.ticketID {
-			updated, err := a.store.GetTicket(context.Background(), msg.ticketID)
+			updated, err := a.orchestrator.GetTicket(context.Background(), msg.ticketID)
 			if err == nil {
 				a.activeTicket = &updated
 				a.ticketView = a.ticketView.SetTicket(&updated)
@@ -642,7 +657,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case notificationMsg:
 		return a, a.showNotification(msg.title, msg.message, msg.variant)
 	case searchQueryMsg:
-		results, err := a.store.ListTickets(context.Background(), store.TicketFilters{Search: msg.query})
+		results, err := a.orchestrator.ListTickets(context.Background(), store.TicketFilters{Search: msg.query})
 		if err == nil {
 			a.kanban, _ = a.kanban.Update(searchResultsMsg{tickets: results})
 		}
@@ -668,7 +683,7 @@ func (a *App) tickCmd() tea.Cmd {
 
 func (a *App) loadProposalCmd(ticketID string) tea.Cmd {
 	return func() tea.Msg {
-		p, err := a.store.GetActiveProposalForTicket(context.Background(), ticketID)
+		p, err := a.orchestrator.GetActiveProposalForTicket(context.Background(), ticketID)
 		if err != nil {
 			return proposalLoadedMsg{proposal: nil, TicketID: ticketID}
 		}
@@ -686,7 +701,7 @@ func (a *App) approveProposalCmd(proposalID string) tea.Cmd {
 			return notificationMsg{title: "Error", message: err.Error(), variant: NotificationError}
 		}
 		// Reload proposal
-		p, _ := a.store.GetProposal(context.Background(), proposalID)
+		p, _ := a.orchestrator.GetProposal(context.Background(), proposalID)
 		return proposalLoadedMsg{proposal: &p, TicketID: p.TicketID}
 	}
 }
@@ -775,7 +790,7 @@ func (a *App) handleMergeResult(msg mergeResultMsg) (tea.Model, tea.Cmd) {
 	case orchestrator.MergeOutcomeMerged:
 		a.kanban, _ = a.kanban.Reload()
 		if a.activeTicket != nil && a.activeTicket.ID == msg.ticketID {
-			if updated, err := a.store.GetTicket(context.Background(), msg.ticketID); err == nil {
+			if updated, err := a.orchestrator.GetTicket(context.Background(), msg.ticketID); err == nil {
 				a.activeTicket = &updated
 				a.ticketView = a.ticketView.SetTicket(&updated)
 			}
@@ -937,7 +952,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.ticketView = a.ticketView.SetTicket(selected)
 			a.view = viewTicket
 			a.ticketView = a.ticketView.SetLoading(a.generatingProposals[selected.ID])
-			p, _ := a.store.GetActiveProposalForTicket(context.Background(), selected.ID)
+			p, _ := a.orchestrator.GetActiveProposalForTicket(context.Background(), selected.ID)
 			if p.ID != "" {
 				a.ticketView = a.ticketView.SetProposal(&p)
 			}
@@ -968,7 +983,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		newCfg, err := config.LoadFromDir(config.GetBaseDir(), a.config.ProjectName)
 		if err == nil {
 			a.config = newCfg
-			a.store.SetTicketPrefix(newCfg.Board.Prefix)
+			a.orchestrator.SetTicketPrefix(newCfg.Board.Prefix)
 			a.kanban, _ = a.kanban.UpdateColumnDefs(newCfg.Board.Columns)
 		} else {
 			a.kanban, _ = a.kanban.Reload()

@@ -28,7 +28,7 @@ func TestDebugDashboardNotFound(t *testing.T) {
     }
 
     fo := newFakeOrchestrator(s)
-    m := NewDashboardModel(s, fo, resolver, agents, testDashboardTheme())
+    m := NewDashboardModel(fo, resolver, agents, testDashboardTheme())
     m.width = 120
     m.height = 40
 

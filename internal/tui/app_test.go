@@ -21,6 +21,7 @@ import (
 
 type fakeOrchestrator struct {
 	store                      *store.Store
+	svc                        *orchestrator.Service
 	lastCreateProposalTicketID string
 	completionCh               chan orchestrator.RunCompletion
 
@@ -43,8 +44,55 @@ type fakeOrchestrator struct {
 func newFakeOrchestrator(s *store.Store) *fakeOrchestrator {
 	return &fakeOrchestrator{
 		store:        s,
+		svc:          orchestrator.NewService(s, nil, nil, nil),
 		completionCh: make(chan orchestrator.RunCompletion, 16),
 	}
+}
+
+// testStore reaches the SQLite store behind the fake orchestrator so a test
+// can seed rows directly.
+func (a *App) testStore() *store.Store {
+	return a.orchestrator.(*fakeOrchestrator).store
+}
+
+func (f *fakeOrchestrator) ListTickets(ctx context.Context, filters store.TicketFilters) ([]store.Ticket, error) {
+	return f.svc.ListTickets(ctx, filters)
+}
+
+func (f *fakeOrchestrator) GetTicket(ctx context.Context, id string) (store.Ticket, error) {
+	return f.svc.GetTicket(ctx, id)
+}
+
+func (f *fakeOrchestrator) CreateTicket(ctx context.Context, in orchestrator.CreateTicketInput) (store.Ticket, error) {
+	return f.svc.CreateTicket(ctx, in)
+}
+
+func (f *fakeOrchestrator) UpdateTicket(ctx context.Context, t store.Ticket) (store.Ticket, error) {
+	return f.svc.UpdateTicket(ctx, t)
+}
+
+func (f *fakeOrchestrator) SetBranchMode(ctx context.Context, ticketID, mode string) (store.Ticket, error) {
+	return f.svc.SetBranchMode(ctx, ticketID, mode)
+}
+
+func (f *fakeOrchestrator) SetTicketPrefix(prefix string) {
+	f.svc.SetTicketPrefix(prefix)
+}
+
+func (f *fakeOrchestrator) ProjectInitDate(ctx context.Context) (time.Time, error) {
+	return f.svc.ProjectInitDate(ctx)
+}
+
+func (f *fakeOrchestrator) GetProposal(ctx context.Context, id string) (store.Proposal, error) {
+	return f.svc.GetProposal(ctx, id)
+}
+
+func (f *fakeOrchestrator) GetActiveProposalForTicket(ctx context.Context, ticketID string) (store.Proposal, error) {
+	return f.svc.GetActiveProposalForTicket(ctx, ticketID)
+}
+
+func (f *fakeOrchestrator) ListActiveSessions(ctx context.Context) ([]store.Session, error) {
+	return f.svc.ListActiveSessions(ctx)
 }
 
 func (f *fakeOrchestrator) CreateProposal(ctx context.Context, input orchestrator.CreateProposalInput) (store.Proposal, error) {
@@ -195,7 +243,7 @@ func newTestApp(t *testing.T) (*App, *fakeOrchestrator) {
 	})
 
 	fo := newFakeOrchestrator(s)
-	app, err := NewApp(cfg, s, reg, AppDeps{
+	app, err := NewApp(cfg, reg, AppDeps{
 		Orchestrator: fo,
 	})
 	if err != nil {
@@ -210,8 +258,8 @@ func TestNewApp(t *testing.T) {
 	if app == nil {
 		t.Fatal("app is nil")
 	}
-	if app.kanban.store == nil {
-		t.Error("kanban store is nil")
+	if app.kanban.board == nil {
+		t.Error("kanban board is nil")
 	}
 	if app.view != viewBoard {
 		t.Errorf("view = %v, want viewBoard", app.view)
@@ -248,7 +296,7 @@ func TestNewAppShowsTicketsCreatedBeforeToday(t *testing.T) {
 	})
 
 	fo := newFakeOrchestrator(s)
-	app, err := NewApp(cfg, s, reg, AppDeps{Orchestrator: fo})
+	app, err := NewApp(cfg, reg, AppDeps{Orchestrator: fo})
 	if err != nil {
 		t.Fatalf("new app: %v", err)
 	}
@@ -270,7 +318,7 @@ func TestMoveToInProgressCreatesProposalRequest(t *testing.T) {
 	app, fo := newTestApp(t)
 	ctx := context.Background()
 
-	ticket, _ := app.store.CreateTicket(ctx, store.Ticket{Status: "backlog", Agent: "opencode", Title: "Test Ticket"})
+	ticket, _ := app.testStore().CreateTicket(ctx, store.Ticket{Status: "backlog", Agent: "opencode", Title: "Test Ticket"})
 	app.activeTicket = &ticket
 
 	// Directly send generateProposalMsg to Update
@@ -399,7 +447,7 @@ func TestAppOpenTicket(t *testing.T) {
 	app, _ := newTestApp(t)
 	ctx := context.Background()
 
-	app.store.CreateTicket(ctx, store.Ticket{Title: "Open Me", Status: "backlog"})
+	app.testStore().CreateTicket(ctx, store.Ticket{Title: "Open Me", Status: "backlog"})
 	var err error
 	app.kanban, err = app.kanban.Reload()
 	if err != nil {
@@ -430,7 +478,7 @@ func TestAppEscapeReturnsToBoard(t *testing.T) {
 	app, _ := newTestApp(t)
 	ctx := context.Background()
 
-	app.store.CreateTicket(ctx, store.Ticket{Title: "Escape Me", Status: "backlog"})
+	app.testStore().CreateTicket(ctx, store.Ticket{Title: "Escape Me", Status: "backlog"})
 	app.kanban, _ = app.kanban.Reload()
 
 	app.Update(tea.KeyMsg{Type: tea.KeyEnter})
@@ -532,11 +580,11 @@ func TestAppJumpSessionEntersDashboardAndSelectsSession(t *testing.T) {
 	titles := []string{"task a", "task b", "task c"}
 	agents := []string{"claude", "claude", "opencode"}
 	for i := range titles {
-		tk, err := app.store.CreateTicket(ctx, store.Ticket{Title: titles[i], Status: "in_progress"})
+		tk, err := app.testStore().CreateTicket(ctx, store.Ticket{Title: titles[i], Status: "in_progress"})
 		if err != nil {
 			t.Fatalf("create ticket: %v", err)
 		}
-		if _, err := app.store.CreateSession(ctx, store.Session{TicketID: tk.ID, Agent: agents[i], Status: "running"}); err != nil {
+		if _, err := app.testStore().CreateSession(ctx, store.Session{TicketID: tk.ID, Agent: agents[i], Status: "running"}); err != nil {
 			t.Fatalf("create session: %v", err)
 		}
 	}
@@ -599,7 +647,7 @@ func TestProposalApprovalAndRunWorkflow(t *testing.T) {
 	app, fo := newTestApp(t)
 	ctx := context.Background()
 
-	ticket, _ := app.store.CreateTicket(ctx, store.Ticket{Status: "backlog", Agent: "claude-code", Title: "Work Ticket"})
+	ticket, _ := app.testStore().CreateTicket(ctx, store.Ticket{Status: "backlog", Agent: "claude-code", Title: "Work Ticket"})
 	app.activeTicket = &ticket
 
 	// 1. Move to in_progress
@@ -620,7 +668,7 @@ func TestProposalApprovalAndRunWorkflow(t *testing.T) {
 	}
 
 	// 3. Mock proposal loading (simulate what happens in App after creation)
-	p, _ := app.store.GetActiveProposalForTicket(ctx, ticket.ID)
+	p, _ := app.testStore().GetActiveProposalForTicket(ctx, ticket.ID)
 	app.Update(proposalLoadedMsg{TicketID: ticket.ID, proposal: &p})
 
 	if app.ticketView.activeProposal == nil {
@@ -632,7 +680,7 @@ func TestProposalApprovalAndRunWorkflow(t *testing.T) {
 	execCmd(app, cmd)
 
 	// Verify status updated in store
-	updatedP, _ := app.store.GetProposal(ctx, p.ID)
+	updatedP, _ := app.testStore().GetProposal(ctx, p.ID)
 	if updatedP.Status != "approved" {
 		t.Errorf("proposal status = %s, want approved", updatedP.Status)
 	}
@@ -642,10 +690,10 @@ func TestProposalApprovalAndRunWorkflow(t *testing.T) {
 	execCmd(app, cmd)
 
 	// Verify session created and agent active
-	if !app.store.HasActiveSession(ctx, ticket.ID) {
+	if !app.testStore().HasActiveSession(ctx, ticket.ID) {
 		t.Error("expected active session")
 	}
-	updatedT, _ := app.store.GetTicket(ctx, ticket.ID)
+	updatedT, _ := app.testStore().GetTicket(ctx, ticket.ID)
 	if !updatedT.AgentActive {
 		t.Error("expected ticket AgentActive to be true")
 	}
@@ -655,8 +703,8 @@ func TestAppInitSchedulesTickWhenAgentActive(t *testing.T) {
 	app, _ := newTestApp(t)
 	ctx := context.Background()
 
-	ticket, _ := app.store.CreateTicket(ctx, store.Ticket{Title: "active", Status: "in_progress"})
-	_ = app.store.SetAgentActive(ctx, ticket.ID, true)
+	ticket, _ := app.testStore().CreateTicket(ctx, store.Ticket{Title: "active", Status: "in_progress"})
+	_ = app.testStore().SetAgentActive(ctx, ticket.ID, true)
 	var err error
 	app.kanban, err = app.kanban.Reload()
 	if err != nil {
@@ -691,8 +739,8 @@ func TestTickCmdRearmsWhenAgentActive(t *testing.T) {
 	app, _ := newTestApp(t)
 	ctx := context.Background()
 
-	ticket, _ := app.store.CreateTicket(ctx, store.Ticket{Title: "active", Status: "in_progress"})
-	_ = app.store.SetAgentActive(ctx, ticket.ID, true)
+	ticket, _ := app.testStore().CreateTicket(ctx, store.Ticket{Title: "active", Status: "in_progress"})
+	_ = app.testStore().SetAgentActive(ctx, ticket.ID, true)
 	app.kanban, _ = app.kanban.Reload()
 
 	cmd := app.tickCmd()
@@ -716,9 +764,9 @@ func TestRunStartedReloadsKanbanAndArmsTick(t *testing.T) {
 	app, fo := newTestApp(t)
 	ctx := context.Background()
 
-	ticket, _ := app.store.CreateTicket(ctx, store.Ticket{Title: "Work", Status: "in_progress", Agent: "claude-code"})
-	proposal, _ := app.store.CreateProposal(ctx, store.Proposal{TicketID: ticket.ID, Status: "approved", Prompt: "p"})
-	_ = app.store.SetAgentActive(ctx, ticket.ID, false)
+	ticket, _ := app.testStore().CreateTicket(ctx, store.Ticket{Title: "Work", Status: "in_progress", Agent: "claude-code"})
+	proposal, _ := app.testStore().CreateProposal(ctx, store.Proposal{TicketID: ticket.ID, Status: "approved", Prompt: "p"})
+	_ = app.testStore().SetAgentActive(ctx, ticket.ID, false)
 	app.kanban, _ = app.kanban.Reload()
 
 	if app.kanban.anyAgentActive() {
@@ -733,7 +781,7 @@ func TestRunStartedReloadsKanbanAndArmsTick(t *testing.T) {
 	}
 
 	// Verify the completion path happened too — fake orchestrator marked active.
-	if !app.store.HasActiveSession(ctx, ticket.ID) {
+	if !app.testStore().HasActiveSession(ctx, ticket.ID) {
 		t.Error("expected active session after run start")
 	}
 
@@ -745,8 +793,8 @@ func TestEscFromDashboardRearmsTickWhenAgentActive(t *testing.T) {
 	app, _ := newTestApp(t)
 	ctx := context.Background()
 
-	ticket, _ := app.store.CreateTicket(ctx, store.Ticket{Title: "active", Status: "in_progress"})
-	_ = app.store.SetAgentActive(ctx, ticket.ID, true)
+	ticket, _ := app.testStore().CreateTicket(ctx, store.Ticket{Title: "active", Status: "in_progress"})
+	_ = app.testStore().SetAgentActive(ctx, ticket.ID, true)
 	app.kanban, _ = app.kanban.Reload()
 
 	app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'i'}})
@@ -771,8 +819,8 @@ func TestEscFromHelpRearmsTickWhenAgentActive(t *testing.T) {
 	app, _ := newTestApp(t)
 	ctx := context.Background()
 
-	ticket, _ := app.store.CreateTicket(ctx, store.Ticket{Title: "active", Status: "in_progress"})
-	_ = app.store.SetAgentActive(ctx, ticket.ID, true)
+	ticket, _ := app.testStore().CreateTicket(ctx, store.Ticket{Title: "active", Status: "in_progress"})
+	_ = app.testStore().SetAgentActive(ctx, ticket.ID, true)
 	app.kanban, _ = app.kanban.Reload()
 
 	app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune{'?'}})
@@ -797,8 +845,8 @@ func TestTickCmdArmsOnlyOneLoopAtATime(t *testing.T) {
 	app, _ := newTestApp(t)
 	ctx := context.Background()
 
-	ticket, _ := app.store.CreateTicket(ctx, store.Ticket{Title: "active", Status: "in_progress"})
-	_ = app.store.SetAgentActive(ctx, ticket.ID, true)
+	ticket, _ := app.testStore().CreateTicket(ctx, store.Ticket{Title: "active", Status: "in_progress"})
+	_ = app.testStore().SetAgentActive(ctx, ticket.ID, true)
 	app.kanban, _ = app.kanban.Reload()
 
 	if cmd := app.tickCmd(); cmd == nil {
@@ -827,9 +875,9 @@ func TestRunStartedDoesNotArmSecondLoop(t *testing.T) {
 	app, fo := newTestApp(t)
 	ctx := context.Background()
 
-	ticket, _ := app.store.CreateTicket(ctx, store.Ticket{Title: "Work", Status: "in_progress", Agent: "claude-code"})
-	proposal, _ := app.store.CreateProposal(ctx, store.Proposal{TicketID: ticket.ID, Status: "approved", Prompt: "p"})
-	_ = app.store.SetAgentActive(ctx, ticket.ID, true)
+	ticket, _ := app.testStore().CreateTicket(ctx, store.Ticket{Title: "Work", Status: "in_progress", Agent: "claude-code"})
+	proposal, _ := app.testStore().CreateProposal(ctx, store.Proposal{TicketID: ticket.ID, Status: "approved", Prompt: "p"})
+	_ = app.testStore().SetAgentActive(ctx, ticket.ID, true)
 	app.kanban, _ = app.kanban.Reload()
 
 	if cmd := app.tickCmd(); cmd == nil {
@@ -850,4 +898,16 @@ func TestRunStartedDoesNotArmSecondLoop(t *testing.T) {
 		}
 	}
 	fo.completeRun(ticket.ID, "", "completed")
+}
+
+func (m KanbanModel) testStore() *store.Store {
+	return m.board.(*fakeOrchestrator).store
+}
+
+func (m TicketViewModel) testStore() *store.Store {
+	return m.board.(*fakeOrchestrator).store
+}
+
+func (m DashboardModel) testStore() *store.Store {
+	return m.orchestrator.(*fakeOrchestrator).store
 }

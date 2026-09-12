@@ -77,6 +77,7 @@ func runTUI() int {
 	mcpManager := mcp.NewManager(cfg.MCP)
 	ctxCarry := mcp.NewContextCarryAdapter(mcpManager, cfg.ProjectName)
 	orch := orchestrator.NewService(s, llmClient, runner, ctxCarry)
+	orch.SetBranchPrefix(cfg.Git.BranchPrefix)
 	if agentRunner != nil {
 		orch.SetAgentRunner(agentRunner)
 	}
@@ -134,7 +135,7 @@ func runTUI() int {
 		_ = reg.Set("agentboard")
 	}
 
-	app, err := tui.NewApp(cfg, s, reg, tui.AppDeps{
+	app, err := tui.NewApp(cfg, reg, tui.AppDeps{
 		Orchestrator:      orch,
 		ActivityEvents:    activityAlerts,
 		ResolvePermission: resolvePermission,

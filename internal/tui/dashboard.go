@@ -31,7 +31,6 @@ type DashboardStyles struct {
 }
 
 type DashboardModel struct {
-	store          *store.Store
 	orchestrator   Orchestrator
 	resolver       *keybinding.Resolver
 	Agents         []config.DetectedAgent
@@ -157,14 +156,13 @@ func NewDashboardStyles(t *theme.Theme) DashboardStyles {
 	}
 }
 
-func NewDashboardModel(s *store.Store, orch Orchestrator, resolver *keybinding.Resolver, Agents []config.DetectedAgent, t *theme.Theme) DashboardModel {
+func NewDashboardModel(orch Orchestrator, resolver *keybinding.Resolver, Agents []config.DetectedAgent, t *theme.Theme) DashboardModel {
 	ti := textinput.New()
 	ti.Placeholder = "Type to send to agent..."
 	ti.CharLimit = 156
 	ti.Width = 40
 
 	return DashboardModel{
-		store:        s,
 		orchestrator: orch,
 		resolver:     resolver,
 		Agents:       Agents,
@@ -343,10 +341,10 @@ func (m DashboardModel) handleKey(msg tea.KeyMsg) (DashboardModel, tea.Cmd) {
 }
 
 func (m *DashboardModel) loadActiveSessions() {
-	if m.store == nil {
+	if m.orchestrator == nil {
 		return
 	}
-	sessions, err := m.store.ListActiveSessions(context.Background())
+	sessions, err := m.orchestrator.ListActiveSessions(context.Background())
 	if err != nil {
 		return
 	}
@@ -561,10 +559,10 @@ func (m DashboardModel) renderContent(width int) string {
 }
 
 func (m DashboardModel) sessionTitle(ticketID string) string {
-	if m.store == nil {
+	if m.orchestrator == nil {
 		return ""
 	}
-	tk, err := m.store.GetTicket(context.Background(), ticketID)
+	tk, err := m.orchestrator.GetTicket(context.Background(), ticketID)
 	if err != nil {
 		return ""
 	}

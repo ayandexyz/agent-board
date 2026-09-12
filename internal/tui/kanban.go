@@ -9,6 +9,7 @@ import (
 
 	"github.com/ayan-de/agent-board/internal/config"
 	"github.com/ayan-de/agent-board/internal/keybinding"
+	"github.com/ayan-de/agent-board/internal/orchestrator"
 	"github.com/ayan-de/agent-board/internal/store"
 	"github.com/ayan-de/agent-board/internal/theme"
 
@@ -41,7 +42,7 @@ type KanbanStyles struct {
 }
 
 type KanbanModel struct {
-	store           *store.Store
+	board           Board
 	resolver        *keybinding.Resolver
 	width           int
 	height          int
@@ -134,16 +135,16 @@ func NewKanbanStyles(t *theme.Theme) KanbanStyles {
 	}
 }
 
-func NewKanbanModel(s *store.Store, resolver *keybinding.Resolver, t *theme.Theme, columns []config.Column) (KanbanModel, error) {
+func NewKanbanModel(board Board, resolver *keybinding.Resolver, t *theme.Theme, columns []config.Column) (KanbanModel, error) {
 	m := KanbanModel{
-		store:           s,
+		board:           board,
 		resolver:        resolver,
 		styles:          NewKanbanStyles(t),
 		theme:           t,
 		tab:             TabBoard,
 		monthOffset:     0,
 		projectInitDate: time.Now(),
-		columnDefs:  columns,
+		columnDefs:      columns,
 	}
 	m.initDynamicState()
 	m, err := m.loadColumns()
@@ -186,7 +187,7 @@ func (m KanbanModel) Update(msg tea.Msg) (KanbanModel, tea.Cmd) {
 		m.columns = groupByStatusDynamic(msg.tickets, m.columnDefs)
 		return m, nil
 	case searchQueryMsg:
-		results, err := m.store.ListTickets(context.Background(), store.TicketFilters{Search: msg.query})
+		results, err := m.board.ListTickets(context.Background(), store.TicketFilters{Search: msg.query})
 		if err == nil {
 			m.columns = groupByStatusDynamic(results, m.columnDefs)
 		}
@@ -347,10 +348,7 @@ func (m KanbanModel) handleKey(msg tea.KeyMsg) (KanbanModel, tea.Cmd) {
 				return notificationMsg{title: "Cannot create ticket", message: "Tickets can only be created in Backlog", variant: NotificationError}
 			}
 		}
-		ticket, err := m.store.CreateTicket(context.Background(), store.Ticket{
-			Title:  "New Ticket",
-			Status: m.columnDefs[0].Status,
-		})
+		ticket, err := m.board.CreateTicket(context.Background(), orchestrator.CreateTicketInput{Title: "New Ticket"})
 		if err != nil {
 			return m, nil
 		}
@@ -611,7 +609,7 @@ func (m KanbanModel) loadColumns() (KanbanModel, error) {
 		toPtr = &to
 	}
 	for i, col := range m.columnDefs {
-		tickets, err := m.store.ListTickets(context.Background(), store.TicketFilters{Status: col.Status, From: fromPtr, To: toPtr})
+		tickets, err := m.board.ListTickets(context.Background(), store.TicketFilters{Status: col.Status, From: fromPtr, To: toPtr})
 		if err != nil {
 			return m, fmt.Errorf("kanban.loadColumns: %w", err)
 		}
@@ -721,7 +719,7 @@ func (m KanbanModel) loadMonth() (KanbanModel, error) {
 	from, to := MonthWindow(m.projectInitDate, m.monthOffset)
 	fromPtr := &from
 	toPtr := &to
-	tickets, err := m.store.ListTickets(context.Background(), store.TicketFilters{From: fromPtr, To: toPtr})
+	tickets, err := m.board.ListTickets(context.Background(), store.TicketFilters{From: fromPtr, To: toPtr})
 	if err != nil {
 		return m, err
 	}

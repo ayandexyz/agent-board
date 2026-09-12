@@ -40,7 +40,7 @@ func newTestKanban(t *testing.T) KanbanModel {
 	km := keybinding.DefaultKeyMap()
 	resolver := keybinding.NewResolver(km)
 
-	model, err := NewKanbanModel(s, resolver, testTheme(), config.DefaultColumns())
+	model, err := NewKanbanModel(newFakeOrchestrator(s), resolver, testTheme(), config.DefaultColumns())
 	if err != nil {
 		t.Fatalf("new kanban model: %v", err)
 	}
@@ -50,7 +50,7 @@ func newTestKanban(t *testing.T) KanbanModel {
 func TestNewKanbanModel(t *testing.T) {
 	m := newTestKanban(t)
 
-	if m.store == nil {
+	if m.board == nil {
 		t.Error("store is nil")
 	}
 	if m.resolver == nil {
@@ -146,7 +146,7 @@ func TestKanbanTicketNavigation(t *testing.T) {
 	ctx := context.Background()
 
 	for i := 0; i < 3; i++ {
-		_, _ = m.store.CreateTicket(ctx, store.Ticket{
+		_, _ = m.testStore().CreateTicket(ctx, store.Ticket{
 			Title:  fmt.Sprintf("Ticket %d", i+1),
 			Status: "backlog",
 		})
@@ -208,7 +208,7 @@ func TestKanbanDeleteTicket(t *testing.T) {
 	m := newTestKanban(t)
 	ctx := context.Background()
 
-	_, _ = m.store.CreateTicket(ctx, store.Ticket{Title: "To Delete", Status: "backlog"})
+	_, _ = m.testStore().CreateTicket(ctx, store.Ticket{Title: "To Delete", Status: "backlog"})
 	m, _ = m.Reload()
 
 	if len(m.columns[0]) != 1 {
@@ -243,7 +243,7 @@ func TestKanbanSelectedTicket(t *testing.T) {
 		t.Error("SelectedTicket() should be nil on empty board")
 	}
 
-	ticket, _ := m.store.CreateTicket(ctx, store.Ticket{Title: "Selected", Status: "backlog"})
+	ticket, _ := m.testStore().CreateTicket(ctx, store.Ticket{Title: "Selected", Status: "backlog"})
 	m, _ = m.Reload()
 
 	selected := m.SelectedTicket()
@@ -263,7 +263,7 @@ func TestKanbanReload(t *testing.T) {
 		t.Fatalf("backlog has %d tickets, want 0 initially", len(m.columns[0]))
 	}
 
-	_, _ = m.store.CreateTicket(ctx, store.Ticket{Title: "External", Status: "backlog"})
+	_, _ = m.testStore().CreateTicket(ctx, store.Ticket{Title: "External", Status: "backlog"})
 	m, err := m.Reload()
 	if err != nil {
 		t.Fatalf("Reload() error: %v", err)
@@ -296,8 +296,8 @@ func TestKanbanViewRendersTickets(t *testing.T) {
 	m.width = 120
 	m.height = 40
 
-	_, _ = m.store.CreateTicket(ctx, store.Ticket{Title: "First Task", Status: "backlog"})
-	_, _ = m.store.CreateTicket(ctx, store.Ticket{Title: "Second Task", Status: "in_progress"})
+	_, _ = m.testStore().CreateTicket(ctx, store.Ticket{Title: "First Task", Status: "backlog"})
+	_, _ = m.testStore().CreateTicket(ctx, store.Ticket{Title: "Second Task", Status: "in_progress"})
 	m, _ = m.Reload()
 
 	view := m.View()
@@ -330,7 +330,7 @@ func TestKanbanViewTruncation(t *testing.T) {
 	m.height = 40
 
 	longTitle := strings.Repeat("A", 100)
-	_, _ = m.store.CreateTicket(ctx, store.Ticket{
+	_, _ = m.testStore().CreateTicket(ctx, store.Ticket{
 		Title:  longTitle,
 		Status: "in_progress",
 	})
@@ -348,7 +348,7 @@ func TestKanbanViewFocusedColumn(t *testing.T) {
 	m.width = 120
 	m.height = 40
 
-	_, _ = m.store.CreateTicket(ctx, store.Ticket{Title: "Focused", Status: "backlog"})
+	_, _ = m.testStore().CreateTicket(ctx, store.Ticket{Title: "Focused", Status: "backlog"})
 	m, _ = m.Reload()
 
 	view := m.View()
@@ -366,7 +366,7 @@ func TestKanbanViewAgentDot(t *testing.T) {
 	m.width = 120
 	m.height = 40
 
-	_, _ = m.store.CreateTicket(ctx, store.Ticket{
+	_, _ = m.testStore().CreateTicket(ctx, store.Ticket{
 		Title:       "Agent Dot Test",
 		Status:      "backlog",
 		Agent:       "claude-code",
@@ -389,7 +389,7 @@ func TestKanbanViewNoAgentDot(t *testing.T) {
 	m.width = 120
 	m.height = 40
 
-	_, _ = m.store.CreateTicket(ctx, store.Ticket{
+	_, _ = m.testStore().CreateTicket(ctx, store.Ticket{
 		Title:  "No Agent",
 		Status: "backlog",
 	})
@@ -437,9 +437,9 @@ func TestKanbanTabNavigation(t *testing.T) {
 func TestKanbanSearchFilter(t *testing.T) {
 	m := newTestKanban(t)
 	ctx := context.Background()
-	m.store.CreateTicket(ctx, store.Ticket{Title: "Fix bug in login", Status: "backlog"})
-	m.store.CreateTicket(ctx, store.Ticket{Title: "Add search feature", Status: "backlog"})
-	m.store.CreateTicket(ctx, store.Ticket{Title: "Database migration", Status: "backlog"})
+	m.testStore().CreateTicket(ctx, store.Ticket{Title: "Fix bug in login", Status: "backlog"})
+	m.testStore().CreateTicket(ctx, store.Ticket{Title: "Add search feature", Status: "backlog"})
+	m.testStore().CreateTicket(ctx, store.Ticket{Title: "Database migration", Status: "backlog"})
 	m, _ = m.Reload()
 
 	m, _ = m.Update(searchResultsMsg{
@@ -508,7 +508,7 @@ func TestLoadColumnsRespectsMonthOffset(t *testing.T) {
 		{Name: "Backlog", Status: "backlog"},
 		{Name: "Done", Status: "done"},
 	}
-	m, err := NewKanbanModel(s, resolver, testTheme(), cols)
+	m, err := NewKanbanModel(newFakeOrchestrator(s), resolver, testTheme(), cols)
 	if err != nil {
 		t.Fatalf("NewKanbanModel: %v", err)
 	}
@@ -619,11 +619,11 @@ func TestKanbanTickRearmsOnlyWhileActive(t *testing.T) {
 	m := newTestKanban(t)
 	ctx := context.Background()
 
-	ticket, err := m.store.CreateTicket(ctx, store.Ticket{Title: "active", Status: "in_progress"})
+	ticket, err := m.testStore().CreateTicket(ctx, store.Ticket{Title: "active", Status: "in_progress"})
 	if err != nil {
 		t.Fatalf("create: %v", err)
 	}
-	_ = m.store.SetAgentActive(ctx, ticket.ID, true)
+	_ = m.testStore().SetAgentActive(ctx, ticket.ID, true)
 	m, _ = m.Reload()
 
 	if cmd := m.armTick(); cmd == nil {
@@ -644,7 +644,7 @@ func TestKanbanTickRearmsOnlyWhileActive(t *testing.T) {
 		t.Fatal("armTick scheduled a second loop after the tick re-armed")
 	}
 
-	_ = m.store.SetAgentActive(ctx, ticket.ID, false)
+	_ = m.testStore().SetAgentActive(ctx, ticket.ID, false)
 	m, _ = m.Reload()
 	m, cmd = m.Update(tickMsg{})
 	if cmd != nil {

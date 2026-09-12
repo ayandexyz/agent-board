@@ -12,7 +12,7 @@ func TestCompletionAttributedToItsOwnTicket(t *testing.T) {
 	app, fo := newTestApp(t)
 	ctx := context.Background()
 	for _, id := range []string{"AGT-01", "AGT-02"} {
-		if _, err := app.store.CreateTicket(ctx, store.Ticket{ID: id, Title: id, Status: "in_progress", Agent: "claude-code"}); err != nil {
+		if _, err := app.testStore().CreateTicket(ctx, store.Ticket{ID: id, Title: id, Status: "in_progress", Agent: "claude-code"}); err != nil {
 			t.Fatal(err)
 		}
 	}
@@ -45,7 +45,7 @@ func TestCompletionAttributedToItsOwnTicket(t *testing.T) {
 func TestStartCmdsDoNotConsumeCompletions(t *testing.T) {
 	app, fo := newTestApp(t)
 	ctx := context.Background()
-	if _, err := app.store.CreateTicket(ctx, store.Ticket{ID: "AGT-01", Title: "x", Status: "in_progress"}); err != nil {
+	if _, err := app.testStore().CreateTicket(ctx, store.Ticket{ID: "AGT-01", Title: "x", Status: "in_progress"}); err != nil {
 		t.Fatal(err)
 	}
 

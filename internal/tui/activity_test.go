@@ -30,11 +30,11 @@ func startSessions(t *testing.T, a *App, tickets ...string) []string {
 	var ids []string
 	for _, tk := range tickets {
 		if tk != "" {
-			if _, err := a.store.CreateTicket(context.Background(), store.Ticket{ID: tk, Title: tk, Status: "in_progress", Priority: "medium"}); err != nil {
+			if _, err := a.testStore().CreateTicket(context.Background(), store.Ticket{ID: tk, Title: tk, Status: "in_progress", Priority: "medium"}); err != nil {
 				t.Fatal(err)
 			}
 		}
-		s, err := a.store.CreateSession(context.Background(), store.Session{TicketID: tk, Agent: "claude-code", Status: "running"})
+		s, err := a.testStore().CreateSession(context.Background(), store.Session{TicketID: tk, Agent: "claude-code", Status: "running"})
 		if err != nil {
 			t.Fatal(err)
 		}

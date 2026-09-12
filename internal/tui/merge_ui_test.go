@@ -24,7 +24,7 @@ func keyRune(r rune) tea.KeyMsg {
 
 func TestStatusChangeRoutesThroughService(t *testing.T) {
 	app, fo := newTestApp(t)
-	ticket, err := app.store.CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "backlog"})
+	ticket, err := app.testStore().CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "backlog"})
 	if err != nil {
 		t.Fatalf("CreateTicket: %v", err)
 	}
@@ -39,13 +39,13 @@ func TestStatusChangeRoutesThroughService(t *testing.T) {
 
 func TestStatusChangeServiceErrorKeepsStore(t *testing.T) {
 	app, fo := newTestApp(t)
-	ticket, _ := app.store.CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "review"})
+	ticket, _ := app.testStore().CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "review"})
 	fo.moveStatusErr = errors.New("boom")
 
 	m, _ := app.Update(statusChangedMsg{ticketID: ticket.ID, newStatus: "done"})
 	app = m.(*App)
 
-	got, _ := app.store.GetTicket(context.Background(), ticket.ID)
+	got, _ := app.testStore().GetTicket(context.Background(), ticket.ID)
 	if got.Status != "review" {
 		t.Errorf("store status = %q, want review (untouched on service error)", got.Status)
 	}
@@ -54,7 +54,7 @@ func TestStatusChangeServiceErrorKeepsStore(t *testing.T) {
 func TestMergeRequestOpensMergeModal(t *testing.T) {
 	app, fo := newTestApp(t)
 	app = sized(t, app)
-	ticket, _ := app.store.CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "review"})
+	ticket, _ := app.testStore().CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "review"})
 	fo.completeErr = &orchestrator.MergeRequiredError{
 		TicketID: ticket.ID,
 		Strategy: orchestrator.MergeStrategyLocal,
@@ -82,7 +82,7 @@ func TestMergeRequestOpensMergeModal(t *testing.T) {
 func TestMergeModalStrategyToggle(t *testing.T) {
 	app, fo := newTestApp(t)
 	app = sized(t, app)
-	ticket, _ := app.store.CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "review"})
+	ticket, _ := app.testStore().CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "review"})
 	fo.completeErr = &orchestrator.MergeRequiredError{TicketID: ticket.ID, Strategy: orchestrator.MergeStrategyLocal}
 
 	m, _ := app.Update(mergeTicketRequestMsg{ticketID: ticket.ID})
@@ -105,7 +105,7 @@ func TestMergeModalStrategyToggle(t *testing.T) {
 func TestMergeModalConfirmCallsMergeTicket(t *testing.T) {
 	app, fo := newTestApp(t)
 	app = sized(t, app)
-	ticket, _ := app.store.CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "review"})
+	ticket, _ := app.testStore().CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "review"})
 	fo.completeErr = &orchestrator.MergeRequiredError{TicketID: ticket.ID, Strategy: orchestrator.MergeStrategyLocal}
 	fo.mergeResult = orchestrator.MergeResult{Outcome: orchestrator.MergeOutcomeMerged, Branch: "agent/x"}
 
@@ -156,7 +156,7 @@ func TestMergeModalConfirmCallsMergeTicket(t *testing.T) {
 func TestMergeModalCancel(t *testing.T) {
 	app, fo := newTestApp(t)
 	app = sized(t, app)
-	ticket, _ := app.store.CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "review"})
+	ticket, _ := app.testStore().CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "review"})
 	fo.completeErr = &orchestrator.MergeRequiredError{TicketID: ticket.ID, Strategy: orchestrator.MergeStrategyLocal}
 
 	m, _ := app.Update(mergeTicketRequestMsg{ticketID: ticket.ID})
@@ -192,7 +192,7 @@ func TestMergeResultConflictShowsError(t *testing.T) {
 func TestMergeRequiredWithOpenPRShowsNotification(t *testing.T) {
 	app, fo := newTestApp(t)
 	app = sized(t, app)
-	ticket, _ := app.store.CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "review"})
+	ticket, _ := app.testStore().CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "review"})
 	fo.completeErr = &orchestrator.MergeRequiredError{
 		TicketID: ticket.ID,
 		Strategy: orchestrator.MergeStrategyPR,
@@ -221,7 +221,7 @@ func openTicketView(t *testing.T, app *App, ticket store.Ticket) *App {
 func TestMergeKeyOnReviewTicketOpensModal(t *testing.T) {
 	app, fo := newTestApp(t)
 	app = sized(t, app)
-	ticket, _ := app.store.CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "review"})
+	ticket, _ := app.testStore().CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "review"})
 	app = openTicketView(t, app, ticket)
 	fo.completeErr = &orchestrator.MergeRequiredError{
 		TicketID: ticket.ID,
@@ -245,7 +245,7 @@ func TestMergeKeyOnReviewTicketOpensModal(t *testing.T) {
 func TestMergeKeyOnNonReviewTicketShowsHint(t *testing.T) {
 	app, fo := newTestApp(t)
 	app = sized(t, app)
-	ticket, _ := app.store.CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "backlog"})
+	ticket, _ := app.testStore().CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "backlog"})
 	app = openTicketView(t, app, ticket)
 
 	m, cmd := app.Update(keyRune('m'))
@@ -271,7 +271,7 @@ func TestMergeKeyOnNonReviewTicketShowsHint(t *testing.T) {
 func TestMergeKeyNoUnmergedWorkMovesToDone(t *testing.T) {
 	app, fo := newTestApp(t)
 	app = sized(t, app)
-	ticket, _ := app.store.CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "review"})
+	ticket, _ := app.testStore().CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "review"})
 	app = openTicketView(t, app, ticket)
 
 	m, cmd := app.Update(keyRune('m'))
@@ -290,7 +290,7 @@ func TestMergeKeyNoUnmergedWorkMovesToDone(t *testing.T) {
 func TestReviewToDoneStatusChangeNeverOpensMergeModal(t *testing.T) {
 	app, fo := newTestApp(t)
 	app = sized(t, app)
-	ticket, _ := app.store.CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "review", WorktreePath: "/wt/x", Branch: "agent/x"})
+	ticket, _ := app.testStore().CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "review", WorktreePath: "/wt/x", Branch: "agent/x"})
 	fo.completeErr = &orchestrator.MergeRequiredError{TicketID: ticket.ID, Strategy: orchestrator.MergeStrategyLocal, Branch: "agent/x"}
 
 	m, _ := app.Update(statusChangedMsg{ticketID: ticket.ID, newStatus: "done"})
@@ -302,7 +302,7 @@ func TestReviewToDoneStatusChangeNeverOpensMergeModal(t *testing.T) {
 	if fo.lastCompletedTicket != "" {
 		t.Fatal("a plain status change must not go through CompleteTicket")
 	}
-	got, _ := app.store.GetTicket(context.Background(), ticket.ID)
+	got, _ := app.testStore().GetTicket(context.Background(), ticket.ID)
 	if got.Status != "done" {
 		t.Errorf("status = %q, want done", got.Status)
 	}
@@ -310,7 +310,7 @@ func TestReviewToDoneStatusChangeNeverOpensMergeModal(t *testing.T) {
 
 func TestDeleteTicketRoutesThroughService(t *testing.T) {
 	app, fo := newTestApp(t)
-	ticket, _ := app.store.CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "backlog"})
+	ticket, _ := app.testStore().CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "backlog"})
 
 	m, _ := app.Update(deleteTicketConfirmMsg{ticketID: ticket.ID})
 	app = m.(*App)
@@ -318,7 +318,7 @@ func TestDeleteTicketRoutesThroughService(t *testing.T) {
 	if fo.lastDeletedTicket != ticket.ID {
 		t.Errorf("DeleteTicket not routed through service, got %q", fo.lastDeletedTicket)
 	}
-	if _, err := app.store.GetTicket(context.Background(), ticket.ID); err == nil {
+	if _, err := app.testStore().GetTicket(context.Background(), ticket.ID); err == nil {
 		t.Error("ticket should be deleted")
 	}
 }
@@ -326,13 +326,13 @@ func TestDeleteTicketRoutesThroughService(t *testing.T) {
 func TestDeleteTicketDirtyRefusalKeepsTicket(t *testing.T) {
 	app, fo := newTestApp(t)
 	app = sized(t, app)
-	ticket, _ := app.store.CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "backlog"})
+	ticket, _ := app.testStore().CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "backlog"})
 	fo.deleteErr = errors.New("worktree has uncommitted changes")
 
 	m, _ := app.Update(deleteTicketConfirmMsg{ticketID: ticket.ID})
 	app = m.(*App)
 
-	if _, err := app.store.GetTicket(context.Background(), ticket.ID); err != nil {
+	if _, err := app.testStore().GetTicket(context.Background(), ticket.ID); err != nil {
 		t.Error("ticket must survive a refused delete")
 	}
 }

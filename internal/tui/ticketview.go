@@ -8,6 +8,7 @@ import (
 
 	"github.com/ayan-de/agent-board/internal/config"
 	"github.com/ayan-de/agent-board/internal/keybinding"
+	"github.com/ayan-de/agent-board/internal/orchestrator"
 	"github.com/ayan-de/agent-board/internal/store"
 	"github.com/ayan-de/agent-board/internal/theme"
 
@@ -76,7 +77,7 @@ type TicketViewStyles struct {
 }
 
 type TicketViewModel struct {
-	store    *store.Store
+	board    Board
 	resolver *keybinding.Resolver
 	width    int
 	height   int
@@ -349,17 +350,6 @@ func ticketFields() []ticketField {
 	}
 }
 
-func (m TicketViewModel) defaultBranchName() string {
-	if m.ticket == nil {
-		return ""
-	}
-	prefix := m.branchPrefix
-	if prefix == "" {
-		prefix = "agent/"
-	}
-	return prefix + strings.ToLower(m.ticket.ID)
-}
-
 func (m TicketViewModel) branchDisplay() string {
 	if m.ticket == nil {
 		return ""
@@ -370,7 +360,7 @@ func (m TicketViewModel) branchDisplay() string {
 		mode = "current"
 		branch = m.currentBranch
 	} else if branch == "" {
-		branch = m.defaultBranchName()
+		branch = orchestrator.DefaultBranchName(m.branchPrefix, m.ticket.ID)
 	}
 	if branch == "" {
 		return m.styles.Empty.Render(mode + " branch")
@@ -384,9 +374,9 @@ func (m TicketViewModel) helpFooter() string {
 	return km.TicketViewHelp() + " │ Esc: back"
 }
 
-func NewTicketViewModel(s *store.Store, resolver *keybinding.Resolver, t *theme.Theme, agents []config.DetectedAgent) TicketViewModel {
+func NewTicketViewModel(board Board, resolver *keybinding.Resolver, t *theme.Theme, agents []config.DetectedAgent) TicketViewModel {
 	return TicketViewModel{
-		store:        s,
+		board:        board,
 		resolver:     resolver,
 		styles:       NewTicketViewStyles(t),
 		fields:       ticketFields(),
@@ -395,6 +385,18 @@ func NewTicketViewModel(s *store.Store, resolver *keybinding.Resolver, t *theme.
 		priorities:   []string{"", "low", "medium", "high", "critical"},
 		branchPrefix: "agent/",
 		viewport:     viewport.New(0, 0),
+	}
+}
+
+// saveTicket persists the ticket's editable fields through the board and
+// takes back what it stored, so the pointer the app shares sees the same
+// ticket the database does.
+func (m TicketViewModel) saveTicket() {
+	if m.ticket == nil {
+		return
+	}
+	if updated, err := m.board.UpdateTicket(context.Background(), *m.ticket); err == nil {
+		*m.ticket = updated
 	}
 }
 
@@ -545,7 +547,7 @@ func (m TicketViewModel) handleViewKey(msg tea.KeyMsg) (TicketViewModel, tea.Cmd
 			m.mode = ticketDependsOnSelectMode
 			m.dependsOnCursor = 0
 			m.dependsOnSelected = m.ticket.DependsOn
-			tickets, _ := m.store.ListTickets(context.Background(), store.TicketFilters{})
+			tickets, _ := m.board.ListTickets(context.Background(), store.TicketFilters{})
 			m.dependsOnTickets = tickets
 			if len(m.dependsOnTickets) > 5 {
 				m.dependsOnTickets = m.dependsOnTickets[:5]
@@ -694,7 +696,7 @@ func (m TicketViewModel) handleEditKey(msg tea.KeyMsg) (TicketViewModel, tea.Cmd
 			f := m.fields[m.cursor]
 			if f.set != nil {
 				f.set(m.ticket, m.editBuffer)
-				_, _ = m.store.UpdateTicket(context.Background(), *m.ticket)
+				m.saveTicket()
 			}
 		}
 		m.mode = ticketViewMode
@@ -726,19 +728,20 @@ func (m TicketViewModel) handleBranchModeSelectKey(msg tea.KeyMsg) (TicketViewMo
 			m.mode = ticketViewMode
 			return m, nil
 		}
-		if branchModeOptions[m.branchModeCursor] == store.BranchModeCurrent {
-			m.ticket.BranchMode = store.BranchModeCurrent
-			m.ticket.Branch = ""
-			_, _ = m.store.UpdateTicket(context.Background(), *m.ticket)
+		mode := branchModeOptions[m.branchModeCursor]
+		updated, err := m.board.SetBranchMode(context.Background(), m.ticket.ID, mode)
+		if err != nil {
+			m.mode = ticketViewMode
+			return m, func() tea.Msg {
+				return notificationMsg{title: "Error", message: err.Error(), variant: NotificationError}
+			}
+		}
+		*m.ticket = updated
+		if mode == store.BranchModeCurrent {
 			m.mode = ticketViewMode
 			return m, nil
 		}
-		m.ticket.BranchMode = store.BranchModeWorktree
-		_, _ = m.store.UpdateTicket(context.Background(), *m.ticket)
 		m.editBuffer = m.ticket.Branch
-		if m.editBuffer == "" {
-			m.editBuffer = m.defaultBranchName()
-		}
 		m.editCursor = len([]rune(m.editBuffer))
 		m.mode = ticketEditMode
 		return m, nil
@@ -787,7 +790,7 @@ func (m TicketViewModel) handleAgentSelectKey(msg tea.KeyMsg) (TicketViewModel, 
 					m.ticket.Agent = m.agents[idx].Name
 				}
 			}
-			_, _ = m.store.UpdateTicket(context.Background(), *m.ticket)
+			m.saveTicket()
 			agent := m.ticket.Agent
 			ticketID := m.ticket.ID
 			m.mode = ticketViewMode
@@ -835,7 +838,7 @@ func (m TicketViewModel) handlePrioritySelectKey(msg tea.KeyMsg) (TicketViewMode
 	case tea.KeyEnter:
 		if m.ticket != nil && m.priorityCursor < len(m.priorities) {
 			m.ticket.Priority = m.priorities[m.priorityCursor]
-			_, _ = m.store.UpdateTicket(context.Background(), *m.ticket)
+			m.saveTicket()
 		}
 		m.mode = ticketViewMode
 		return m, nil
@@ -877,7 +880,7 @@ func (m TicketViewModel) handleDependsOnSelectKey(msg tea.KeyMsg) (TicketViewMod
 	case tea.KeyEnter:
 		if m.ticket != nil {
 			m.ticket.DependsOn = m.dependsOnSelected
-			_, _ = m.store.UpdateTicket(context.Background(), *m.ticket)
+			m.saveTicket()
 		}
 		m.mode = ticketViewMode
 		return m, nil
