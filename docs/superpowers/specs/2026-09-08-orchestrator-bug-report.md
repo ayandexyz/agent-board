@@ -79,6 +79,8 @@ Fix: hold `s.mu` across the check and mark the ticket merging; `StartAdHocRun` r
 `internal/orchestrator/merge.go:145-163`. `MoveStatus(done)` commits before `Cleanup`; on cleanup failure only an event is logged and `SetWorktreePath("")` is skipped. Nothing ever reclaims it.
 
 ### 12. SQLite without busy_timeout or WAL
+**Fixed** on `fix/sqlite-pragmas`: the DSN carries `busy_timeout(5000)`, `journal_mode(WAL)` and `foreign_keys(1)`; a second process waits for the write lock instead of failing.
+
 `internal/store/sqlite.go:30-40`. A second agentboard process on the same database hits `SQLITE_BUSY` immediately. The completion path discards those errors (`summarizer.go:402-414`).
 
 Fix: `_pragma=busy_timeout(5000)` and `journal_mode(WAL)` in the DSN.
