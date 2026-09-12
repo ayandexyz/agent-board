@@ -38,7 +38,8 @@ func WriteDefaultConfig(path string) error {
 
 [general]
 log = "info"
-addr = ":8080"
+addr = "127.0.0.1:7878"  # loopback HTTP API; reach it remotely over an SSH forward
+api = true
 mode = "tui"
 tmux = "auto"
 

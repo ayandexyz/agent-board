@@ -165,6 +165,17 @@ func TestApplyEnvVars(t *testing.T) {
 			},
 		},
 		{
+			name: "AGENTBOARD_API=off disables General.API",
+			envVars: map[string]string{
+				"AGENTBOARD_API": "off",
+			},
+			check: func(cfg *Config, t *testing.T) {
+				if cfg.General.API {
+					t.Error("General.API = true, want false")
+				}
+			},
+		},
+		{
 			name: "AGENTBOARD_TMUX overrides General.Tmux",
 			envVars: map[string]string{
 				"AGENTBOARD_TMUX": "always",
@@ -367,8 +378,8 @@ theme = "dracula"
 	if cfg.General.Log != "error" {
 		t.Errorf("General.Log = %q, env should override to %q", cfg.General.Log, "error")
 	}
-	if cfg.General.Addr != ":8080" {
-		t.Errorf("General.Addr = %q, want default %q", cfg.General.Addr, ":8080")
+	if cfg.General.Addr != "127.0.0.1:7878" {
+		t.Errorf("General.Addr = %q, want default %q", cfg.General.Addr, "127.0.0.1:7878")
 	}
 	if cfg.TUI.Theme != "dracula" {
 		t.Errorf("TUI.Theme = %q, project should override to %q", cfg.TUI.Theme, "dracula")

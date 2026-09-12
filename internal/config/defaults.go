@@ -4,7 +4,8 @@ func SetDefaults() *Config {
 	return &Config{
 		General: GeneralConfig{
 			Log:  "info",
-			Addr: ":8080",
+			Addr: "127.0.0.1:7878",
+			API:  true,
 			Mode: "tui",
 			Tmux: "auto",
 		},

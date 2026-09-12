@@ -68,6 +68,9 @@ func applyEnvVars(cfg *Config) {
 	if v := os.Getenv("AGENTBOARD_ADDR"); v != "" {
 		cfg.General.Addr = v
 	}
+	if v := os.Getenv("AGENTBOARD_API"); v != "" {
+		cfg.General.API = !(v == "off" || v == "false" || v == "0")
+	}
 	if v := os.Getenv("AGENTBOARD_MODE"); v != "" {
 		cfg.General.Mode = v
 	}

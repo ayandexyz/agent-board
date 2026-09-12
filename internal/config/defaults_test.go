@@ -10,8 +10,11 @@ func TestSetDefaults(t *testing.T) {
 	if cfg.General.Log != "info" {
 		t.Errorf("General.Log = %q, want %q", cfg.General.Log, "info")
 	}
-	if cfg.General.Addr != ":8080" {
-		t.Errorf("General.Addr = %q, want %q", cfg.General.Addr, ":8080")
+	if cfg.General.Addr != "127.0.0.1:7878" {
+		t.Errorf("General.Addr = %q, want %q", cfg.General.Addr, "127.0.0.1:7878")
+	}
+	if !cfg.General.API {
+		t.Error("General.API should default to true")
 	}
 	if cfg.General.Mode != "tui" {
 		t.Errorf("General.Mode = %q, want %q", cfg.General.Mode, "tui")

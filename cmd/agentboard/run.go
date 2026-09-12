@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 
 	"github.com/ayan-de/agent-board/internal/activity"
+	"github.com/ayan-de/agent-board/internal/api"
 	"github.com/ayan-de/agent-board/internal/config"
 	"github.com/ayan-de/agent-board/internal/git"
 	"github.com/ayan-de/agent-board/internal/llm"
@@ -17,6 +18,7 @@ import (
 	"github.com/ayan-de/agent-board/internal/theme"
 	"github.com/ayan-de/agent-board/internal/tmux"
 	"github.com/ayan-de/agent-board/internal/tui"
+	"github.com/ayan-de/agent-board/internal/version"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -85,6 +87,7 @@ func runTUI() int {
 	var resolvePermission func(sessionID, decision string)
 	var activityAlerts <-chan activity.Alert
 	var activityReader tui.ActivityReader
+	var apiActivity api.Activity
 	recv := activity.New()
 	recv.Label = orch.WindowForSession
 	recv.Store = s
@@ -100,11 +103,31 @@ func runTUI() int {
 		orch.SetActivityState(recv.StateOf)
 		resolvePermission = func(sessionID, decision string) { recv.Resolve(sessionID, decision) }
 		activityReader = recv
+		apiActivity = recv
 		// One subscription per consumer: the TUI's stream is its own, so an
 		// API or push client added later takes nothing away from it.
 		alerts, unsubscribe := recv.Subscribe()
 		defer unsubscribe()
 		activityAlerts = alerts
+	}
+
+	if cfg.General.API {
+		apiServer := &api.Server{
+			Addr:     cfg.General.Addr,
+			Board:    orch,
+			Activity: apiActivity,
+			Identity: api.Identity{
+				Name:        "agentboard",
+				Version:     version.Version,
+				Project:     cfg.ProjectName,
+				TmuxSession: sessionName,
+			},
+		}
+		if _, err := apiServer.Start(); err != nil {
+			fmt.Fprintf(os.Stderr, "warning: api unavailable: %v\n", err)
+		} else {
+			defer apiServer.Close()
+		}
 	}
 
 	g := git.New(git.ExecRunner())
