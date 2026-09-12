@@ -2,6 +2,7 @@ package orchestrator_test
 
 import (
 	"context"
+	"errors"
 	"os"
 	"strings"
 	"testing"
@@ -345,6 +346,7 @@ func TestStartAdHocRunOpencodeWithoutHookURLExportsNoConfig(t *testing.T) {
 type fakeAgentRunner struct {
 	stopped bool
 	killed  string
+	sent    []string
 }
 
 func (f *fakeAgentRunner) Start(_ context.Context, _ orchestrator.RunRequest) (orchestrator.RunHandle, error) {
@@ -352,6 +354,10 @@ func (f *fakeAgentRunner) Start(_ context.Context, _ orchestrator.RunRequest) (o
 }
 func (f *fakeAgentRunner) GetPaneID(string) (string, bool) { return "%1", true }
 func (f *fakeAgentRunner) Kill(id string) error            { f.killed = id; return nil }
+func (f *fakeAgentRunner) SendInput(id, text string) error {
+	f.sent = append(f.sent, id+":"+text)
+	return nil
+}
 
 func TestStopSessionCancelsMonitorAndKillsPane(t *testing.T) {
 	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01"}}
@@ -413,5 +419,55 @@ func TestStartApprovedRunWithoutRunnerClearsAgentActive(t *testing.T) {
 	}
 	if fs.lastEndStatus != "failed" {
 		t.Fatalf("session end status = %q, want failed", fs.lastEndStatus)
+	}
+}
+
+func TestSendInputRefusesBlockedAndExited(t *testing.T) {
+	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01"}}
+	fr := &fakeAgentRunner{}
+	svc := orchestrator.NewService(fs, nil, nil, nil)
+	svc.SetAgentRunner(fr)
+	state := activity.StateActive
+	svc.SetActivityState(func(string) activity.State { return state })
+
+	sess, err := svc.StartAdHocRun(context.Background(), "AGT-01", "opencode", "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	state = activity.StateBlocked
+	if err := svc.SendInput(sess.ID, "hello"); !errors.Is(err, orchestrator.ErrInputSuppressed) {
+		t.Fatalf("blocked: err = %v, want ErrInputSuppressed", err)
+	}
+	state = activity.StateExited
+	if err := svc.SendInput(sess.ID, "hello"); !errors.Is(err, orchestrator.ErrInputSuppressed) {
+		t.Fatalf("exited: err = %v, want ErrInputSuppressed", err)
+	}
+	if len(fr.sent) != 0 {
+		t.Fatalf("input reached the pane while suppressed: %v", fr.sent)
+	}
+
+	for _, ok := range []activity.State{activity.StateActive, activity.StateIdle, activity.StateWaitingInput, ""} {
+		state = ok
+		if err := svc.SendInput(sess.ID, "hello"); err != nil {
+			t.Fatalf("state %q: err = %v", ok, err)
+		}
+	}
+	if len(fr.sent) != 4 || fr.sent[0] != sess.ID+":hello" {
+		t.Fatalf("sent = %v", fr.sent)
+	}
+}
+
+func TestSendInputWithoutActivityStateDelegates(t *testing.T) {
+	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01"}}
+	fr := &fakeAgentRunner{}
+	svc := orchestrator.NewService(fs, nil, nil, nil)
+	svc.SetAgentRunner(fr)
+	sess, _ := svc.StartAdHocRun(context.Background(), "AGT-01", "opencode", "x")
+	if err := svc.SendInput(sess.ID, "go"); err != nil {
+		t.Fatal(err)
+	}
+	if len(fr.sent) != 1 {
+		t.Fatalf("sent = %v", fr.sent)
 	}
 }

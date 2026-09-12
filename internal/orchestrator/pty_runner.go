@@ -161,24 +161,53 @@ func (r *tmuxAgentRunner) injectPrompt(ctx context.Context, paneID, sessionID st
 	if err != nil {
 		return
 	}
-	prompt := string(promptBytes)
+	// Newlines become spaces: in every agent's composer Enter submits, so a
+	// multi-line prompt typed verbatim would be sent one paragraph at a time.
+	prompt := strings.ReplaceAll(string(promptBytes), "\n", " ")
+	_ = sendKeysChunked(ctx, paneID, prompt)
+}
 
-	for _, c := range prompt {
-		if ctx.Err() != nil {
-			return
+// sendChunk is how much text one send-keys carries. Well under ARG_MAX, and
+// large enough that a ticket prompt is one or two calls rather than one per
+// character.
+const sendChunk = 16 * 1024
+
+// submitPause is the gap between the last chunk and Enter, so the composer
+// has drained the paste before it is told to send.
+var submitPause = 300 * time.Millisecond
+
+// sendKeysChunked types text into a pane as literal keystrokes and submits it.
+func sendKeysChunked(ctx context.Context, paneID, text string) error {
+	for i := 0; i < len(text); i += sendChunk {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("orchestrator.sendKeys: %w", err)
 		}
-		if c == '\n' {
-			if err := exec.Command("tmux", "send-keys", "-t", paneID, "-l", " ").Run(); err != nil {
-				return
-			}
-		} else {
-			if err := exec.Command("tmux", "send-keys", "-t", paneID, "-l", fmt.Sprintf("%c", c)).Run(); err != nil {
-				return
-			}
+		end := i + sendChunk
+		if end > len(text) {
+			end = len(text)
 		}
-		time.Sleep(10 * time.Millisecond)
+		if err := exec.Command("tmux", "send-keys", "-t", paneID, "-l", text[i:end]).Run(); err != nil {
+			return fmt.Errorf("orchestrator.sendKeys: %w", err)
+		}
 	}
-	exec.Command("tmux", "send-keys", "-t", paneID, "Enter").Run()
+	select {
+	case <-ctx.Done():
+		return fmt.Errorf("orchestrator.sendKeys: %w", ctx.Err())
+	case <-time.After(submitPause):
+	}
+	if err := exec.Command("tmux", "send-keys", "-t", paneID, "Enter").Run(); err != nil {
+		return fmt.Errorf("orchestrator.sendKeys enter: %w", err)
+	}
+	return nil
+}
+
+// SendInput types a line into the session's pane and submits it.
+func (r *tmuxAgentRunner) SendInput(sessionID, text string) error {
+	paneID, ok := r.GetPaneID(sessionID)
+	if !ok {
+		return fmt.Errorf("orchestrator.sendInput: no pane for session %s", sessionID)
+	}
+	return sendKeysChunked(context.Background(), paneID, text)
 }
 
 func waitForReady(ctx context.Context, paneID string, cfg *pty.Config) error {

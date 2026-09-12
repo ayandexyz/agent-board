@@ -46,6 +46,8 @@ Fix: undo both on that path, same as the other error branches.
 Fix: replace the shared channel with the event hub from the tracking design, or make the send non-blocking and drive the TUI from a subscription.
 
 ### 7. Prompt injection forks one tmux process per character
+**Fixed** on `fix/guarded-send-input`: `sendKeysChunked` sends `send-keys -l` in 16 KiB chunks, pauses 300 ms, then `Enter`; cancellation stops it before Enter.
+
 `internal/orchestrator/pty_runner.go:93-104`. One `exec.Command` per rune with a 10 ms sleep. A 2 KB prompt is about 2000 forks and 20 s. Any single `send-keys` error returns mid-prompt with no error surfaced and no `onComplete`, while the monitor keeps running.
 
 Fix: `send-keys -l` in 16 KB chunks, 300 ms pause, then `Enter`. Report failure through `onComplete`.

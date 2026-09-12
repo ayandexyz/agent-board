@@ -91,6 +91,7 @@ func runTUI() int {
 		defer recv.Close()
 		orch.SetHookBaseURL(base)
 		orch.SetLaunchNotifier(recv.Launch)
+		orch.SetActivityState(recv.StateOf)
 		resolvePermission = func(sessionID, decision string) { recv.Resolve(sessionID, decision) }
 		// One subscription per consumer: the TUI's stream is its own, so an
 		// API or push client added later takes nothing away from it.

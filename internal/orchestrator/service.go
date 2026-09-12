@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os/exec"
 	"strings"
@@ -31,7 +32,13 @@ type Service struct {
 	completionCh   chan RunCompletion
 	hookBaseURL    string
 	onLaunch       func(sessionID, launchID string, decisions activity.DecisionCodec)
+	activityState  func(sessionID string) activity.State
 }
+
+// ErrInputSuppressed is returned by SendInput when typing into the pane would
+// do the wrong thing: answer a permission dialog the user never saw, or land
+// in the shell an exited agent left behind.
+var ErrInputSuppressed = errors.New("orchestrator: input suppressed")
 
 // AgentSession tracks an active agent session
 type AgentSession struct {
@@ -74,6 +81,13 @@ func (s *Service) SetHookBaseURL(url string) {
 // codec its agent reads a permission decision in.
 func (s *Service) SetLaunchNotifier(f func(sessionID, launchID string, decisions activity.DecisionCodec)) {
 	s.onLaunch = f
+}
+
+// SetActivityState gives SendInput a way to ask what a session is doing right
+// now, so a keystroke is refused rather than delivered into a permission
+// dialog. Nil (the default) means every send goes through.
+func (s *Service) SetActivityState(f func(sessionID string) activity.State) {
+	s.activityState = f
 }
 
 // launchSpec is the identity a spawned agent reports back with, plus whatever
@@ -504,11 +518,27 @@ func (s *Service) GetLogs(sessionID string) []string {
 	return s.logs[sessionID]
 }
 
+// SendInput types a line into a session's pane. The state check happens
+// immediately before the write, every time: a session that was idle a moment
+// ago may be blocked on a dialog now, and Enter would answer it.
 func (s *Service) SendInput(sessionID, input string) error {
+	if s.activityState != nil {
+		switch s.activityState(sessionID) {
+		case activity.StateBlocked:
+			return fmt.Errorf("%w: session is blocked on a permission dialog", ErrInputSuppressed)
+		case activity.StateExited:
+			return fmt.Errorf("%w: agent has exited, the pane holds a shell", ErrInputSuppressed)
+		}
+	}
+	if s.agentRunner != nil {
+		if _, ok := s.agentRunner.GetPaneID(sessionID); ok {
+			return s.agentRunner.SendInput(sessionID, input)
+		}
+	}
 	if tmuxRunner, ok := s.runner.(*TmuxRunner); ok {
 		return tmuxRunner.SendInput(sessionID, input)
 	}
-	return fmt.Errorf("service.sendInput: no tmux runner available for session %s", sessionID)
+	return fmt.Errorf("service.sendInput: no pane for session %s", sessionID)
 }
 
 // GetTmuxRunner returns the runner as a TmuxRunner if it is one

@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"regexp"
 	"strings"
@@ -716,4 +717,49 @@ func parseDuration(t *testing.T, s string) time.Time {
 		t.Fatalf("parse duration %q: %v", s, err)
 	}
 	return time.Now().Add(-d)
+}
+
+func TestDashboardReportsRefusedInput(t *testing.T) {
+	m := newTestDashboard(t)
+	fo := m.orchestrator.(*fakeOrchestrator)
+	ctx := context.Background()
+	ticket, err := m.store.CreateTicket(ctx, store.Ticket{Title: "Test task", Status: "in_progress"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	sess, err := m.store.CreateSession(ctx, store.Session{TicketID: ticket.ID, Agent: "opencode", Status: "running"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	m = m.Refresh()
+	m.JumpToSession(0)
+	if got := m.SelectedSession(); got == nil || got.SessionID != sess.ID {
+		t.Fatalf("selected session = %+v", got)
+	}
+
+	fo.sendInputErr = errors.New("orchestrator: input suppressed: session is blocked on a permission dialog")
+	m.isInput = true
+	m.input.SetValue("continue")
+	m, cmd := m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if fo.lastInput != sess.ID+":continue" {
+		t.Fatalf("SendInput got %q", fo.lastInput)
+	}
+	if cmd == nil {
+		t.Fatal("a refused send produced no notification cmd")
+	}
+	n, ok := cmd().(notificationMsg)
+	if !ok || n.variant != NotificationError || !strings.Contains(n.message, "blocked") {
+		t.Fatalf("cmd produced %#v", cmd())
+	}
+	if m.isInput {
+		t.Fatal("input mode stayed open after a refused send")
+	}
+
+	fo.sendInputErr = nil
+	m.isInput = true
+	m.input.SetValue("ok")
+	_, cmd = m.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	if cmd != nil {
+		t.Fatal("an accepted send produced a cmd")
+	}
 }

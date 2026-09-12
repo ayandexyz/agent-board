@@ -254,10 +254,17 @@ func (m DashboardModel) Update(msg tea.Msg) (DashboardModel, tea.Cmd) {
 				val := m.input.Value()
 				if val != "" {
 					sess := m.SelectedSession()
-					if sess != nil {
-						_ = m.orchestrator.SendInput(sess.SessionID, val)
-					}
 					m.input.SetValue("")
+					m.isInput = false
+					m.input.Blur()
+					if sess != nil {
+						if err := m.orchestrator.SendInput(sess.SessionID, val); err != nil {
+							return m, func() tea.Msg {
+								return notificationMsg{title: "Input refused", message: err.Error(), variant: NotificationError}
+							}
+						}
+					}
+					return m, nil
 				}
 				m.isInput = false
 				m.input.Blur()
