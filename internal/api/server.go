@@ -65,6 +65,8 @@ type Server struct {
 	Board    Board
 	Activity Activity
 	Identity Identity
+	// Terminals streams tmux windows over the terminal routes. Optional.
+	Terminals TerminalOpener
 
 	hub  *eventHub
 	once sync.Once
@@ -86,7 +88,22 @@ func (s *Server) init() {
 // under another server.
 func (s *Server) Handler() http.Handler {
 	s.init()
-	return s.mux
+	return rejectBrowserOrigins(s.mux)
+}
+
+// rejectBrowserOrigins turns away any request carrying an Origin header. A
+// browser always sends one on a cross-site POST or WebSocket, so a page in
+// the user's desktop browser cannot drive the loopback API; native apps,
+// curl and SSH forwards send none. A browser front end will need an
+// allowlist here, not the removal of the check.
+func rejectBrowserOrigins(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Header.Get("Origin") != "" {
+			writeError(w, http.StatusForbidden, "browser origins are not accepted")
+			return
+		}
+		next.ServeHTTP(w, r)
+	})
 }
 
 // Start binds the address, refuses anything that is not loopback, and begins
