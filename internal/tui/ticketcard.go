@@ -19,6 +19,51 @@ type TicketCardModel struct {
 	frame    int
 	styles   TicketCardStyles
 	theme    *theme.Theme
+	activity string
+}
+
+// ActivityGlyph is the one-character mark a card shows for what its agent is
+// doing right now. Empty for a session that has never reported.
+func ActivityGlyph(state string) string {
+	switch state {
+	case "active":
+		return "●"
+	case "idle":
+		return "○"
+	case "waiting_input":
+		return "?"
+	case "blocked":
+		return "!"
+	case "exited":
+		return "×"
+	}
+	return ""
+}
+
+// WithActivity marks the card with the agent's reported state.
+func (c TicketCardModel) WithActivity(state string) TicketCardModel {
+	c.activity = state
+	return c
+}
+
+func (c TicketCardModel) activityMark() string {
+	glyph := ActivityGlyph(c.activity)
+	if glyph == "" {
+		return ""
+	}
+	color, ok := c.styles.PriorityColors["medium"]
+	switch c.activity {
+	case "blocked":
+		color, ok = c.styles.PriorityColors["critical"]
+	case "waiting_input":
+		color, ok = c.styles.PriorityColors["high"]
+	case "idle", "exited":
+		color, ok = c.styles.PriorityColors["low"]
+	}
+	if !ok {
+		color = lipgloss.Color("252")
+	}
+	return lipgloss.NewStyle().Bold(true).Foreground(color).Render(glyph)
 }
 
 type TicketCardStyles struct {
@@ -182,6 +227,10 @@ func (c TicketCardModel) renderFooter(width int) string {
 	priorityIndicator := lipgloss.NewStyle().Foreground(priorityColor).Render(fmt.Sprintf("⬥ %s", c.ticket.Priority))
 
 	leftParts := []string{}
+
+	if mark := c.activityMark(); mark != "" {
+		leftParts = append(leftParts, mark)
+	}
 
 	if c.ticket.AgentActive {
 		barWidth := width / 4

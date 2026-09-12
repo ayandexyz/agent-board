@@ -57,6 +57,14 @@ type KanbanModel struct {
 	searchQuery     string
 	monthOffset     int
 	projectInitDate time.Time
+	activity        map[string]string
+}
+
+// WithActivity gives the board each ticket's reported agent state, keyed by
+// ticket id, for the glyph on its card.
+func (m KanbanModel) WithActivity(a map[string]string) KanbanModel {
+	m.activity = a
+	return m
 }
 
 func DefaultKanbanStyles() KanbanStyles {
@@ -442,7 +450,7 @@ func (m KanbanModel) View() string {
 				isSelected := i == m.colIndex && j == m.cursors[i]
 				isExpanded := j == expandedIdx
 
-				card := NewTicketCardModel(tickets[j], isSelected, isExpanded, cardWidth, m.animFrame, m.theme)
+				card := NewTicketCardModel(tickets[j], isSelected, isExpanded, cardWidth, m.animFrame, m.theme).WithActivity(m.activity[tickets[j].ID])
 				cardsContent.WriteString(card.Render())
 
 				// Add spacer if not the last card and there's more content below (either a card or an indicator)
