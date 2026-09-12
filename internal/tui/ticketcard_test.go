@@ -198,3 +198,26 @@ func TestDefaultTicketCardStyles(t *testing.T) {
 		t.Error("SelectedBorder should have a border set")
 	}
 }
+
+func TestActivityGlyph(t *testing.T) {
+	cases := map[string]string{
+		"active": "●", "idle": "○", "waiting_input": "?", "blocked": "!", "exited": "×", "": "", "bogus": "",
+	}
+	for state, want := range cases {
+		if got := ActivityGlyph(state); got != want {
+			t.Errorf("ActivityGlyph(%q) = %q want %q", state, got, want)
+		}
+	}
+}
+
+func TestTicketCardRendersActivityGlyph(t *testing.T) {
+	tk := store.Ticket{ID: "AGT-03", Title: "x", Priority: "medium", Agent: "claude-code", AgentActive: true}
+	plain := NewTicketCardModel(tk, false, false, 40, 0, nil).Render()
+	if strings.Contains(plain, "!") {
+		t.Fatal("glyph rendered with no activity state")
+	}
+	blocked := NewTicketCardModel(tk, false, false, 40, 0, nil).WithActivity("blocked").Render()
+	if !strings.Contains(blocked, "!") {
+		t.Fatalf("blocked glyph not rendered:\n%s", blocked)
+	}
+}

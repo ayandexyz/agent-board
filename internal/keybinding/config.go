@@ -23,6 +23,7 @@ var actionNames = map[string]Action{
 	"jump_col4":           ActionJumpColumn4,
 	"show_help":           ActionShowHelp,
 	"go_to_ticket_prefix": ActionGoToTicket,
+	"show_waiting":        ActionShowWaiting,
 }
 
 func ApplyConfig(km *KeyMap, overrides map[string]string) {

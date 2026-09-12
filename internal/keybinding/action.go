@@ -48,6 +48,7 @@ const (
 	ActionJumpSession8
 	ActionJumpSession9
 	ActionMergeTicket
+	ActionShowWaiting
 )
 
 func (a Action) String() string {
@@ -116,6 +117,8 @@ func (a Action) String() string {
 		return "cycle_status"
 	case ActionMergeTicket:
 		return "merge_ticket"
+	case ActionShowWaiting:
+		return "show_waiting"
 	case ActionApproveProposal:
 		return "approve_proposal"
 	case ActionViewProposal:

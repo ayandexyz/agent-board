@@ -83,6 +83,7 @@ func runTUI() int {
 
 	var resolvePermission func(sessionID, decision string)
 	var activityAlerts <-chan activity.Alert
+	var activityReader tui.ActivityReader
 	recv := activity.New()
 	recv.Label = orch.WindowForSession
 	recv.Store = s
@@ -97,6 +98,7 @@ func runTUI() int {
 		orch.SetLaunchNotifier(recv.Launch)
 		orch.SetActivityState(recv.StateOf)
 		resolvePermission = func(sessionID, decision string) { recv.Resolve(sessionID, decision) }
+		activityReader = recv
 		// One subscription per consumer: the TUI's stream is its own, so an
 		// API or push client added later takes nothing away from it.
 		alerts, unsubscribe := recv.Subscribe()
@@ -136,6 +138,7 @@ func runTUI() int {
 		Orchestrator:      orch,
 		ActivityEvents:    activityAlerts,
 		ResolvePermission: resolvePermission,
+		Activity:          activityReader,
 		CurrentBranch:     currentBranch,
 	})
 	if err != nil {

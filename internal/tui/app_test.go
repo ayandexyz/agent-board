@@ -35,6 +35,7 @@ type fakeOrchestrator struct {
 	lastDeletedTicket string
 	lastInput         string
 	sendInputErr      error
+	lastSwitchedPane  string
 }
 
 func newFakeOrchestrator(s *store.Store) *fakeOrchestrator {
@@ -107,7 +108,8 @@ func (f *fakeOrchestrator) GetPaneContent(sessionID string, lines int) (string, 
 }
 
 func (f *fakeOrchestrator) SwitchToPane(sessionID string) error {
-	return fmt.Errorf("not implemented in fake")
+	f.lastSwitchedPane = sessionID
+	return nil
 }
 
 func (f *fakeOrchestrator) SubscribeCompletions() (<-chan orchestrator.RunCompletion, func()) {

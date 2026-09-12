@@ -299,7 +299,11 @@ The receiver writes through to the store when `Receiver.Store` is set (`run.go` 
 
 Every keystroke the board sends to an agent goes through `Service.SendInput`, which asks the receiver's `StateOf` immediately before writing (`SetActivityState`, wired in `run.go`) and refuses with `ErrInputSuppressed` while the session is `blocked` — Enter would answer the permission dialog — or `exited`, where the pane holds a bare shell. The dashboard shows the refusal as a notification. Text is typed with `sendKeysChunked`: `send-keys -l` in 16 KiB chunks, a 300 ms pause, then `Enter`; the launch prompt uses the same path with newlines replaced by spaces, since Enter submits in every agent's composer.
 
-Not built yet: the tool-flight rule beyond "any PostToolUse clears the block", the TUI glyph/waiting overlay, and the capture-pane reconciler.
+### On the board
+
+The TUI reads agent state through `tui.ActivityReader` (`StateOf`, `Waiting`), which the receiver satisfies. `App.refreshActivity` maps live sessions to their tickets on every animation tick, alert, run start and run completion; each card's footer then carries `ActivityGlyph` (`●` active, `○` idle, `?` waiting for an answer, `!` blocked on a permission, `×` exited) and the header shows `N waiting` when any session needs a human. `W` opens the waiting overlay: one row per waiting session, `y`/`n` resolve a held permission through the same `ResolvePermission` the approval modal uses (only offered when a hook is actually holding the request), `Enter` switches to the agent's tmux window. A question is never decidable from the overlay — the answer is typed in the pane.
+
+Not built yet: the tool-flight rule beyond "any PostToolUse clears the block", the notification policy (suppress when the ticket is on screen), and the capture-pane reconciler.
 
 Every agent pane is launched with its session identity exported via `tmux new-window -e`:
 
@@ -464,6 +468,7 @@ Backlog -> In Progress            -> Review              -> Done
 | `d` | Delete ticket (with confirmation) |
 | `s` | Start agent on selected ticket |
 | `m` | Merge ticket (Review only): opens the merge modal |
+| `W` | Waiting agents overlay: `y`/`n` answer a held permission, `Enter` jumps to the pane |
 | `x` | Stop running agent |
 | `r` | Refresh board state |
 | `Tab` | Toggle focus between board and agent pane |
