@@ -160,3 +160,63 @@ func (s *Store) HasActiveSession(ctx context.Context, ticketID string) bool {
 	}
 	return count > 0
 }
+
+// SessionActivity is a live session's last reported state, as the receiver
+// wrote it. State is empty and ActivityAt zero for a session that has never
+// reported.
+type SessionActivity struct {
+	SessionID  string
+	TicketID   string
+	Agent      string
+	State      string
+	ActivityAt time.Time
+	LaunchID   string
+	StartedAt  time.Time
+}
+
+func (s *Store) SetActivity(ctx context.Context, sessionID, state string, at time.Time) error {
+	res, err := s.db.ExecContext(ctx, "UPDATE sessions SET activity_state = ?, activity_at = ? WHERE id = ?", state, at, sessionID)
+	if err != nil {
+		return fmt.Errorf("store.setActivity: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("store.setActivity %s: %w", sessionID, ErrNotFound)
+	}
+	return nil
+}
+
+func (s *Store) SetLaunchID(ctx context.Context, sessionID, launchID string) error {
+	res, err := s.db.ExecContext(ctx, "UPDATE sessions SET launch_id = ? WHERE id = ?", launchID, sessionID)
+	if err != nil {
+		return fmt.Errorf("store.setLaunchID: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return fmt.Errorf("store.setLaunchID %s: %w", sessionID, ErrNotFound)
+	}
+	return nil
+}
+
+// ListActivity returns every session that has not ended, oldest first.
+func (s *Store) ListActivity(ctx context.Context) ([]SessionActivity, error) {
+	rows, err := s.db.QueryContext(ctx,
+		"SELECT id, ticket_id, agent, activity_state, activity_at, launch_id, started_at FROM sessions WHERE ended_at IS NULL ORDER BY started_at ASC",
+	)
+	if err != nil {
+		return nil, fmt.Errorf("store.listActivity: %w", err)
+	}
+	defer rows.Close()
+
+	var out []SessionActivity
+	for rows.Next() {
+		var a SessionActivity
+		var at sql.NullTime
+		if err := rows.Scan(&a.SessionID, &a.TicketID, &a.Agent, &a.State, &at, &a.LaunchID, &a.StartedAt); err != nil {
+			return nil, fmt.Errorf("store.listActivity: %w", err)
+		}
+		if at.Valid {
+			a.ActivityAt = at.Time
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}

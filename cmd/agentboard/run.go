@@ -85,6 +85,10 @@ func runTUI() int {
 	var activityAlerts <-chan activity.Alert
 	recv := activity.New()
 	recv.Label = orch.WindowForSession
+	recv.Store = s
+	if err := recv.Restore(context.Background()); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: activity state not restored: %v\n", err)
+	}
 	if base, err := recv.Start(); err != nil {
 		fmt.Fprintf(os.Stderr, "warning: activity receiver unavailable: %v\n", err)
 	} else {
