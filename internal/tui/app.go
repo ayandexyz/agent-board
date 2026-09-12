@@ -140,6 +140,7 @@ type Orchestrator interface {
 	StartApprovedRun(ctx context.Context, proposalID string) (store.Session, error)
 	StartAdHocRun(ctx context.Context, ticketID, agent, prompt string) (store.Session, error)
 	MoveTicketStatus(ctx context.Context, ticketID, newStatus string) error
+	CompleteTicket(ctx context.Context, ticketID string) error
 	MergeTicket(ctx context.Context, ticketID string, strategy orchestrator.MergeStrategy) (orchestrator.MergeResult, error)
 	DeleteTicket(ctx context.Context, ticketID string) error
 	FinishRun(ctx context.Context, input orchestrator.FinishRunInput) error
@@ -584,7 +585,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.kanban, _ = a.kanban.Reload()
 		return a, nil
 	case mergeTicketRequestMsg:
-		return a.handleStatusChanged(statusChangedMsg{ticketID: msg.ticketID, newStatus: "done"})
+		return a.handleMergeRequest(msg.ticketID)
 	case mergeConfirmMsg:
 		return a, a.mergeTicketCmd(msg.ticketID, msg.strategy)
 	case mergeResultMsg:
@@ -723,15 +724,15 @@ func (a *App) startDirectRunAndListenCmd(ticketID, agent, prompt string) tea.Cmd
 	}
 }
 
-func (a *App) handleStatusChanged(msg statusChangedMsg) (tea.Model, tea.Cmd) {
-	err := a.orchestrator.MoveTicketStatus(context.Background(), msg.ticketID, msg.newStatus)
+func (a *App) handleMergeRequest(ticketID string) (tea.Model, tea.Cmd) {
+	err := a.orchestrator.CompleteTicket(context.Background(), ticketID)
 	if err != nil {
 		var mergeReq *orchestrator.MergeRequiredError
 		if errors.As(err, &mergeReq) {
 			if mergeReq.PRURL != "" {
 				return a, a.showNotification(
 					"PR not merged yet",
-					fmt.Sprintf("%s has an open PR: %s", msg.ticketID, mergeReq.PRURL),
+					fmt.Sprintf("%s has an open PR: %s", ticketID, mergeReq.PRURL),
 					NotificationInfo,
 				)
 			}
@@ -740,20 +741,22 @@ func (a *App) handleStatusChanged(msg statusChangedMsg) (tea.Model, tea.Cmd) {
 		}
 		return a, a.showNotification("Error", err.Error(), NotificationError)
 	}
+	return a.afterStatusChange(ticketID, "done")
+}
 
-	// Update local state if it's the active ticket
-	if a.activeTicket != nil && a.activeTicket.ID == msg.ticketID {
-		a.activeTicket.Status = msg.newStatus
-		a.ticketView = a.ticketView.SetTicket(a.activeTicket)
+func (a *App) handleStatusChanged(msg statusChangedMsg) (tea.Model, tea.Cmd) {
+	if err := a.orchestrator.MoveTicketStatus(context.Background(), msg.ticketID, msg.newStatus); err != nil {
+		return a, a.showNotification("Error", err.Error(), NotificationError)
 	}
+	return a.afterStatusChange(msg.ticketID, msg.newStatus)
+}
 
-	var cmds []tea.Cmd
-	cmds = append(cmds, a.showNotification("Status updated", fmt.Sprintf("%s moved to %s", msg.ticketID, msg.newStatus), NotificationSuccess))
-	if a.activeTicket != nil && a.activeTicket.ID == msg.ticketID {
-		a.ticketView = a.ticketView.SetLoading(false)
+func (a *App) afterStatusChange(ticketID, newStatus string) (tea.Model, tea.Cmd) {
+	if a.activeTicket != nil && a.activeTicket.ID == ticketID {
+		a.activeTicket.Status = newStatus
+		a.ticketView = a.ticketView.SetTicket(a.activeTicket).SetLoading(false)
 	}
-
-	return a, tea.Batch(cmds...)
+	return a, a.showNotification("Status updated", fmt.Sprintf("%s moved to %s", ticketID, newStatus), NotificationSuccess)
 }
 
 func (a *App) mergeTicketCmd(ticketID string, strategy orchestrator.MergeStrategy) tea.Cmd {

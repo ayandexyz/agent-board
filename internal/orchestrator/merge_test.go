@@ -211,11 +211,33 @@ func TestMoveTicketStatusPlainTransition(t *testing.T) {
 	}
 }
 
-func TestMoveTicketStatusReviewToDoneRequiresMerge(t *testing.T) {
+func TestMoveTicketStatusReviewToDoneIsUngated(t *testing.T) {
+	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01", Status: "review", WorktreePath: "/wt/AGT-01", Branch: "agent/agt-01", PRURL: "https://pr/7"}}
+	ops := &fakeGitOps{prState: git.PRInfo{State: "OPEN", URL: "https://pr/7"}}
+	svc := newMergeService(fs, ops)
+
+	if err := svc.MoveTicketStatus(context.Background(), "AGT-01", "done"); err != nil {
+		t.Fatalf("MoveTicketStatus: %v", err)
+	}
+	if fs.lastMoveStatus != "done" {
+		t.Errorf("MoveStatus = %q, want done regardless of unmerged work", fs.lastMoveStatus)
+	}
+	if ops.cleanupCalled {
+		t.Error("a plain status move must not touch the worktree")
+	}
+	if fs.ticket.WorktreePath != "/wt/AGT-01" {
+		t.Error("a plain status move must keep the worktree path")
+	}
+	if !fs.hasEventKind("status.changed") {
+		t.Errorf("status.changed event missing, got %v", fs.events)
+	}
+}
+
+func TestCompleteTicketRequiresMerge(t *testing.T) {
 	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01", Status: "review", WorktreePath: "/wt/AGT-01", Branch: "agent/agt-01"}}
 	svc := newMergeService(fs, &fakeGitOps{})
 
-	err := svc.MoveTicketStatus(context.Background(), "AGT-01", "done")
+	err := svc.CompleteTicket(context.Background(), "AGT-01")
 	var mergeReq *orchestrator.MergeRequiredError
 	if !errors.As(err, &mergeReq) {
 		t.Fatalf("err = %v, want *MergeRequiredError", err)
@@ -231,13 +253,13 @@ func TestMoveTicketStatusReviewToDoneRequiresMerge(t *testing.T) {
 	}
 }
 
-func TestMoveTicketStatusReviewToDonePRMerged(t *testing.T) {
+func TestCompleteTicketPRMerged(t *testing.T) {
 	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01", Status: "review", WorktreePath: "/wt/AGT-01", PRURL: "https://pr/7"}}
 	ops := &fakeGitOps{prState: git.PRInfo{State: "MERGED", URL: "https://pr/7"}}
 	svc := newMergeService(fs, ops)
 
-	if err := svc.MoveTicketStatus(context.Background(), "AGT-01", "done"); err != nil {
-		t.Fatalf("MoveTicketStatus with merged PR: %v", err)
+	if err := svc.CompleteTicket(context.Background(), "AGT-01"); err != nil {
+		t.Fatalf("CompleteTicket with merged PR: %v", err)
 	}
 	if fs.lastMoveStatus != "done" {
 		t.Errorf("MoveStatus = %q, want done", fs.lastMoveStatus)
@@ -250,12 +272,12 @@ func TestMoveTicketStatusReviewToDonePRMerged(t *testing.T) {
 	}
 }
 
-func TestMoveTicketStatusReviewToDonePROpen(t *testing.T) {
+func TestCompleteTicketPROpen(t *testing.T) {
 	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01", Status: "review", WorktreePath: "/wt/AGT-01", PRURL: "https://pr/7"}}
 	ops := &fakeGitOps{prState: git.PRInfo{State: "OPEN", URL: "https://pr/7"}}
 	svc := newMergeService(fs, ops)
 
-	err := svc.MoveTicketStatus(context.Background(), "AGT-01", "done")
+	err := svc.CompleteTicket(context.Background(), "AGT-01")
 	var mergeReq *orchestrator.MergeRequiredError
 	if !errors.As(err, &mergeReq) {
 		t.Fatalf("err = %v, want *MergeRequiredError", err)
@@ -268,12 +290,12 @@ func TestMoveTicketStatusReviewToDonePROpen(t *testing.T) {
 	}
 }
 
-func TestMoveTicketStatusReviewToDoneNoWorktreePassesThrough(t *testing.T) {
+func TestCompleteTicketNoWorktreePassesThrough(t *testing.T) {
 	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01", Status: "review"}}
 	svc := newMergeService(fs, &fakeGitOps{})
 
-	if err := svc.MoveTicketStatus(context.Background(), "AGT-01", "done"); err != nil {
-		t.Fatalf("MoveTicketStatus: %v", err)
+	if err := svc.CompleteTicket(context.Background(), "AGT-01"); err != nil {
+		t.Fatalf("CompleteTicket: %v", err)
 	}
 	if fs.lastMoveStatus != "done" {
 		t.Errorf("MoveStatus = %q, want done for ticket without worktree", fs.lastMoveStatus)
@@ -404,7 +426,7 @@ func TestMergeRefusedWhileRunStarting(t *testing.T) {
 	close(runner.release)
 }
 
-func TestMoveToDoneWithMergedPRRefusesActiveSession(t *testing.T) {
+func TestCompleteTicketWithMergedPRRefusesActiveSession(t *testing.T) {
 	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01", Status: "review", WorktreePath: "/wt/AGT-01", PRURL: "https://pr/7"}}
 	ops := &fakeGitOps{prState: git.PRInfo{State: "MERGED", URL: "https://pr/7"}}
 	svc := newMergeService(fs, ops)
@@ -413,7 +435,7 @@ func TestMoveToDoneWithMergedPRRefusesActiveSession(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	err := svc.MoveTicketStatus(context.Background(), "AGT-01", "done")
+	err := svc.CompleteTicket(context.Background(), "AGT-01")
 	if err == nil {
 		t.Fatal("moved to done and cleaned up the worktree under a running agent")
 	}
@@ -461,12 +483,12 @@ func TestCleanupFailureKeepsTicketInReview(t *testing.T) {
 	}
 }
 
-func TestMoveToDoneWithMergedPRCleanupFailureKeepsReview(t *testing.T) {
+func TestCompleteTicketWithMergedPRCleanupFailureKeepsReview(t *testing.T) {
 	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01", Status: "review", WorktreePath: "/wt/AGT-01", PRURL: "https://pr/7"}}
 	ops := &fakeGitOps{prState: git.PRInfo{State: "MERGED"}, cleanupErr: errors.New("busy")}
 	svc := newMergeService(fs, ops)
 
-	if err := svc.MoveTicketStatus(context.Background(), "AGT-01", "done"); err == nil {
+	if err := svc.CompleteTicket(context.Background(), "AGT-01"); err == nil {
 		t.Fatal("cleanup failure was swallowed on the PR path")
 	}
 	if fs.lastMoveStatus == "done" {

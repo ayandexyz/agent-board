@@ -34,14 +34,14 @@ func TestStartAdHocRunSkipsWorktreeForCurrentBranch(t *testing.T) {
 	}
 }
 
-func TestMoveTicketStatusToDoneSkipsMergeGateForCurrentBranch(t *testing.T) {
+func TestCompleteTicketSkipsMergeGateForCurrentBranch(t *testing.T) {
 	fs := &fakeStore{ticket: store.Ticket{
 		ID: "AGT-01", Status: "review", Branch: "feat/x", BranchMode: store.BranchModeCurrent,
 	}}
 	svc := newMergeService(fs, &fakeGitOps{})
 
-	if err := svc.MoveTicketStatus(context.Background(), "AGT-01", "done"); err != nil {
-		t.Fatalf("MoveTicketStatus: %v", err)
+	if err := svc.CompleteTicket(context.Background(), "AGT-01"); err != nil {
+		t.Fatalf("CompleteTicket: %v", err)
 	}
 	if fs.lastMoveStatus != "done" {
 		t.Errorf("lastMoveStatus = %q, want done", fs.lastMoveStatus)

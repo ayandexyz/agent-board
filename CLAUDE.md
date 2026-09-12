@@ -385,11 +385,11 @@ The ticket's Branch row is a toggle, not a text field: `e` on it opens
 **Current branch | Worktree branch**.
 
 - `worktree` (default, `tickets.branch_mode`): existing behaviour — the agent
-  gets its own worktree and `agent/<ticket-id>` branch, and Review -> Done is
-  merge-gated.
+  gets its own worktree and `agent/<ticket-id>` branch, and `m` (merge) offers
+  to merge that branch before the ticket is done.
 - `current`: no worktree. `prepareWorkDir` returns an empty work dir so the
   agent runs in the board's own checkout on whatever branch is already out, and
-  `MoveTicketStatus` skips the merge gate.
+  `CompleteTicket` has nothing to merge.
 
 Choosing "Worktree branch" drops straight into an edit box prefilled with the
 default branch name so it can be renamed before the agent starts. Choosing
@@ -400,22 +400,22 @@ single predicate everything else reads.
 
 ```
 Backlog -> In Progress            -> Review              -> Done
-           worktree + branch         merge gate            worktree removed,
+           worktree + branch         `m` merges            worktree removed,
            created, agent cwd        (modal in TUI)        branch deleted
 ```
 
 - **Spawn** (`orchestrator.Service.prepareWorkDir`): `git worktree add ~/.agentboard/worktrees/<project>/<ticket-id> -b agent/<ticket-id> <base>` (branch from `ticket.Branch` if set), tmux window opens with `-c <worktree>`. Path persisted in `tickets.worktree_path`; `worktree.created` event recorded.
-- **Review -> Done is gated**: `Service.MoveTicketStatus` refuses the transition with a typed `*MergeRequiredError` when unmerged work exists; the TUI turns that into a merge confirm modal (press `s` in the modal to switch strategy for this merge). `Service.MergeTicket(ctx, id, strategy)` performs the merge and moves the ticket to done itself.
+- **Review -> Done is not gated**: `Service.MoveTicketStatus` is a plain status change for every transition, so a ticket can be moved to done with its worktree and branch left in place. Merging is explicit: `m` on a review ticket calls `Service.CompleteTicket`, which returns a typed `*MergeRequiredError` when unmerged work exists (the TUI turns that into the merge confirm modal; press `s` in the modal to switch strategy for this merge), cleans up and moves to done when the ticket's PR already reports MERGED, and otherwise moves the ticket to done. `Service.MergeTicket(ctx, id, strategy)` performs the merge and moves the ticket to done itself.
 - **Strategies** (`[git] merge_strategy`, default `local`):
   - `local`: rebase the ticket branch onto the base branch *inside the worktree*, then `git merge --ff-only` in the repo root (root must be clean and on the base branch). Conflicts abort the rebase, emit a `merge.conflict` event, and leave the ticket in review.
-  - `pr`: push the branch and `gh pr create`; PR URL stored in `tickets.pr_url`. Moving to done requires the PR to report MERGED (`gh pr view --json state`), then cleanup runs with a forced branch delete (squash-safe).
-- **Guardrails**: merges, PR-finalize and delete refuse while an agent session is active or still being spawned, and a run refuses to start (`ErrTicketBusy`) while a merge or delete holds the ticket — `Service.reserve` takes the claim under the same lock as the active-session check, so neither can slip in between the other's check and act. Cleanup runs before the ticket moves to done: if the worktree cannot be removed the ticket stays in review with its path intact and merging again retries. Dirty worktrees are never auto-removed (ticket delete also refuses); no git repo -> all of this degrades to the old behavior.
+  - `pr`: push the branch and `gh pr create`; PR URL stored in `tickets.pr_url`. Pressing `m` again once the PR reports MERGED (`gh pr view --json state`) runs cleanup with a forced branch delete (squash-safe) and moves the ticket to done.
+- **Guardrails**: merges, PR-finalize and delete refuse while an agent session is active or still being spawned, and a run refuses to start (`ErrTicketBusy`) while a merge or delete holds the ticket — `Service.reserve` takes the claim under the same lock as the active-session check, so neither can slip in between the other's check and act. Cleanup runs before a merge moves the ticket to done: if the worktree cannot be removed the ticket stays in review with its path intact and merging again retries. Dirty worktrees are never auto-removed (ticket delete also refuses); no git repo -> all of this degrades to the old behavior.
 
 ### Key packages
 
 - `internal/git` — pure git/gh command wrappers over an injectable `Runner` closure (`ExecRunner()` in production, fakes in tests; no exec in unit tests).
 - `internal/orchestrator/worktrees.go` — `WorktreeManager` (implements `Worktrees` + `Merger`).
-- `internal/orchestrator/merge.go` — `MergeTicket`, `MoveTicketStatus`, `DeleteTicket`, `MergeRequiredError`.
+- `internal/orchestrator/merge.go` — `MergeTicket`, `CompleteTicket`, `MoveTicketStatus`, `DeleteTicket`, `MergeRequiredError`.
 - Integration tests against real git: `go test -tags integration ./internal/orchestrator/`.
 
 ### Config (`[git]` in config.toml)
@@ -467,7 +467,7 @@ Backlog -> In Progress            -> Review              -> Done
 | `a` | Add new ticket |
 | `d` | Delete ticket (with confirmation) |
 | `s` | Start agent on selected ticket |
-| `m` | Merge ticket (Review only): opens the merge modal |
+| `m` | Merge ticket (Review only): opens the merge modal when unmerged work exists, otherwise moves to Done |
 | `W` | Waiting agents overlay: `y`/`n` answer a held permission, `Enter` jumps to the pane |
 | `x` | Stop running agent |
 | `r` | Refresh board state |

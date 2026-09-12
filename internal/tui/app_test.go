@@ -24,18 +24,20 @@ type fakeOrchestrator struct {
 	lastCreateProposalTicketID string
 	completionCh               chan orchestrator.RunCompletion
 
-	moveStatusErr     error
-	lastMoveTicketID  string
-	lastMoveStatus    string
-	mergeResult       orchestrator.MergeResult
-	mergeErr          error
-	mergeCalled       bool
-	lastMergeStrategy orchestrator.MergeStrategy
-	deleteErr         error
-	lastDeletedTicket string
-	lastInput         string
-	sendInputErr      error
-	lastSwitchedPane  string
+	moveStatusErr       error
+	completeErr         error
+	lastCompletedTicket string
+	lastMoveTicketID    string
+	lastMoveStatus      string
+	mergeResult         orchestrator.MergeResult
+	mergeErr            error
+	mergeCalled         bool
+	lastMergeStrategy   orchestrator.MergeStrategy
+	deleteErr           error
+	lastDeletedTicket   string
+	lastInput           string
+	sendInputErr        error
+	lastSwitchedPane    string
 }
 
 func newFakeOrchestrator(s *store.Store) *fakeOrchestrator {
@@ -136,6 +138,14 @@ func (f *fakeOrchestrator) MoveTicketStatus(ctx context.Context, ticketID, newSt
 	f.lastMoveTicketID = ticketID
 	f.lastMoveStatus = newStatus
 	return f.store.MoveStatus(ctx, ticketID, newStatus)
+}
+
+func (f *fakeOrchestrator) CompleteTicket(ctx context.Context, ticketID string) error {
+	if f.completeErr != nil {
+		return f.completeErr
+	}
+	f.lastCompletedTicket = ticketID
+	return f.store.MoveStatus(ctx, ticketID, "done")
 }
 
 func (f *fakeOrchestrator) MergeTicket(ctx context.Context, ticketID string, strategy orchestrator.MergeStrategy) (orchestrator.MergeResult, error) {

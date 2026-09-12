@@ -169,12 +169,27 @@ func (s *Service) finalizeMerge(ctx context.Context, ticket store.Ticket, forceB
 }
 
 func (s *Service) MoveTicketStatus(ctx context.Context, ticketID, newStatus string) error {
+	if err := s.store.MoveStatus(ctx, ticketID, newStatus); err != nil {
+		return err
+	}
+	_, _ = s.store.CreateEvent(ctx, store.Event{
+		TicketID: ticketID,
+		Kind:     "status.changed",
+		Payload:  newStatus,
+	})
+	return nil
+}
+
+// CompleteTicket is the merge-aware way to finish a review ticket: unmerged
+// work returns a *MergeRequiredError for the caller to act on, an already
+// merged PR is cleaned up, and anything else is a plain move to done.
+func (s *Service) CompleteTicket(ctx context.Context, ticketID string) error {
 	ticket, err := s.store.GetTicket(ctx, ticketID)
 	if err != nil {
 		return err
 	}
 
-	if ticket.Status == "review" && newStatus == "done" && s.merger != nil && ticket.UsesWorktree() {
+	if s.merger != nil && ticket.UsesWorktree() {
 		hasWork := ticket.WorktreePath != "" || ticket.Branch != "" || ticket.PRURL != ""
 		if hasWork {
 			if ticket.PRURL != "" {
@@ -201,15 +216,7 @@ func (s *Service) MoveTicketStatus(ctx context.Context, ticketID, newStatus stri
 		}
 	}
 
-	if err := s.store.MoveStatus(ctx, ticketID, newStatus); err != nil {
-		return err
-	}
-	_, _ = s.store.CreateEvent(ctx, store.Event{
-		TicketID: ticketID,
-		Kind:     "status.changed",
-		Payload:  newStatus,
-	})
-	return nil
+	return s.MoveTicketStatus(ctx, ticketID, "done")
 }
 
 func (s *Service) DeleteTicket(ctx context.Context, ticketID string) error {

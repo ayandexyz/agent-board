@@ -51,17 +51,17 @@ func TestStatusChangeServiceErrorKeepsStore(t *testing.T) {
 	}
 }
 
-func TestReviewToDoneOpensMergeModal(t *testing.T) {
+func TestMergeRequestOpensMergeModal(t *testing.T) {
 	app, fo := newTestApp(t)
 	app = sized(t, app)
 	ticket, _ := app.store.CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "review"})
-	fo.moveStatusErr = &orchestrator.MergeRequiredError{
+	fo.completeErr = &orchestrator.MergeRequiredError{
 		TicketID: ticket.ID,
 		Strategy: orchestrator.MergeStrategyLocal,
 		Branch:   "agent/agt-01",
 	}
 
-	m, _ := app.Update(statusChangedMsg{ticketID: ticket.ID, newStatus: "done"})
+	m, _ := app.Update(mergeTicketRequestMsg{ticketID: ticket.ID})
 	app = m.(*App)
 
 	if !app.mergeModal.Active() {
@@ -83,9 +83,9 @@ func TestMergeModalStrategyToggle(t *testing.T) {
 	app, fo := newTestApp(t)
 	app = sized(t, app)
 	ticket, _ := app.store.CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "review"})
-	fo.moveStatusErr = &orchestrator.MergeRequiredError{TicketID: ticket.ID, Strategy: orchestrator.MergeStrategyLocal}
+	fo.completeErr = &orchestrator.MergeRequiredError{TicketID: ticket.ID, Strategy: orchestrator.MergeStrategyLocal}
 
-	m, _ := app.Update(statusChangedMsg{ticketID: ticket.ID, newStatus: "done"})
+	m, _ := app.Update(mergeTicketRequestMsg{ticketID: ticket.ID})
 	app = m.(*App)
 
 	m, _ = app.Update(keyRune('s'))
@@ -106,10 +106,10 @@ func TestMergeModalConfirmCallsMergeTicket(t *testing.T) {
 	app, fo := newTestApp(t)
 	app = sized(t, app)
 	ticket, _ := app.store.CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "review"})
-	fo.moveStatusErr = &orchestrator.MergeRequiredError{TicketID: ticket.ID, Strategy: orchestrator.MergeStrategyLocal}
+	fo.completeErr = &orchestrator.MergeRequiredError{TicketID: ticket.ID, Strategy: orchestrator.MergeStrategyLocal}
 	fo.mergeResult = orchestrator.MergeResult{Outcome: orchestrator.MergeOutcomeMerged, Branch: "agent/x"}
 
-	m, _ := app.Update(statusChangedMsg{ticketID: ticket.ID, newStatus: "done"})
+	m, _ := app.Update(mergeTicketRequestMsg{ticketID: ticket.ID})
 	app = m.(*App)
 
 	// toggle to pr, move cursor to confirm, press enter
@@ -157,9 +157,9 @@ func TestMergeModalCancel(t *testing.T) {
 	app, fo := newTestApp(t)
 	app = sized(t, app)
 	ticket, _ := app.store.CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "review"})
-	fo.moveStatusErr = &orchestrator.MergeRequiredError{TicketID: ticket.ID, Strategy: orchestrator.MergeStrategyLocal}
+	fo.completeErr = &orchestrator.MergeRequiredError{TicketID: ticket.ID, Strategy: orchestrator.MergeStrategyLocal}
 
-	m, _ := app.Update(statusChangedMsg{ticketID: ticket.ID, newStatus: "done"})
+	m, _ := app.Update(mergeTicketRequestMsg{ticketID: ticket.ID})
 	app = m.(*App)
 
 	m, _ = app.Update(tea.KeyMsg{Type: tea.KeyEsc})
@@ -193,13 +193,13 @@ func TestMergeRequiredWithOpenPRShowsNotification(t *testing.T) {
 	app, fo := newTestApp(t)
 	app = sized(t, app)
 	ticket, _ := app.store.CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "review"})
-	fo.moveStatusErr = &orchestrator.MergeRequiredError{
+	fo.completeErr = &orchestrator.MergeRequiredError{
 		TicketID: ticket.ID,
 		Strategy: orchestrator.MergeStrategyPR,
 		PRURL:    "https://github.com/u/r/pull/7",
 	}
 
-	m, _ := app.Update(statusChangedMsg{ticketID: ticket.ID, newStatus: "done"})
+	m, _ := app.Update(mergeTicketRequestMsg{ticketID: ticket.ID})
 	app = m.(*App)
 
 	if app.mergeModal.Active() {
@@ -223,7 +223,7 @@ func TestMergeKeyOnReviewTicketOpensModal(t *testing.T) {
 	app = sized(t, app)
 	ticket, _ := app.store.CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "review"})
 	app = openTicketView(t, app, ticket)
-	fo.moveStatusErr = &orchestrator.MergeRequiredError{
+	fo.completeErr = &orchestrator.MergeRequiredError{
 		TicketID: ticket.ID,
 		Strategy: orchestrator.MergeStrategyLocal,
 		Branch:   "agent/x",
@@ -282,8 +282,29 @@ func TestMergeKeyNoUnmergedWorkMovesToDone(t *testing.T) {
 	m, _ = app.Update(cmd())
 	app = m.(*App)
 
-	if fo.lastMoveStatus != "done" {
-		t.Errorf("ticket without unmerged work should move to done, got %q", fo.lastMoveStatus)
+	if fo.lastCompletedTicket != ticket.ID {
+		t.Errorf("ticket without unmerged work should be completed, got %q", fo.lastCompletedTicket)
+	}
+}
+
+func TestReviewToDoneStatusChangeNeverOpensMergeModal(t *testing.T) {
+	app, fo := newTestApp(t)
+	app = sized(t, app)
+	ticket, _ := app.store.CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "review", WorktreePath: "/wt/x", Branch: "agent/x"})
+	fo.completeErr = &orchestrator.MergeRequiredError{TicketID: ticket.ID, Strategy: orchestrator.MergeStrategyLocal, Branch: "agent/x"}
+
+	m, _ := app.Update(statusChangedMsg{ticketID: ticket.ID, newStatus: "done"})
+	app = m.(*App)
+
+	if app.mergeModal.Active() {
+		t.Fatal("a plain status change must not open the merge modal")
+	}
+	if fo.lastCompletedTicket != "" {
+		t.Fatal("a plain status change must not go through CompleteTicket")
+	}
+	got, _ := app.store.GetTicket(context.Background(), ticket.ID)
+	if got.Status != "done" {
+		t.Errorf("status = %q, want done", got.Status)
 	}
 }
 
