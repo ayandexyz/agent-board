@@ -28,7 +28,7 @@ type Service struct {
 	mu            sync.RWMutex
 
 	activeSessions map[string]*AgentSession
-	completionCh   chan RunCompletion
+	completions    map[*completionSub]struct{}
 	hookBaseURL    string
 	onLaunch       func(sessionID, launchID string, decisions activity.DecisionCodec)
 }
@@ -53,7 +53,47 @@ func NewService(store Store, llm LLMClient, runner Runner, ctx ContextCarryProvi
 		ctx:            ctx,
 		logs:           make(map[string][]string),
 		activeSessions: make(map[string]*AgentSession),
-		completionCh:   make(chan RunCompletion, 16),
+		completions:    make(map[*completionSub]struct{}),
+	}
+}
+
+// completionBuffer is how many unread completions a subscriber may fall
+// behind by before it starts losing them. Losing one costs a toast; blocking
+// on it would hold the agent's monitor goroutine forever.
+const completionBuffer = 64
+
+type completionSub struct {
+	ch   chan RunCompletion
+	once sync.Once
+}
+
+// SubscribeCompletions returns a stream of run completions and a cancel func.
+// Every subscriber gets every completion raised after it subscribed, on its
+// own buffer, so two consumers never take completions from one another.
+func (s *Service) SubscribeCompletions() (<-chan RunCompletion, func()) {
+	sub := &completionSub{ch: make(chan RunCompletion, completionBuffer)}
+	s.mu.Lock()
+	s.completions[sub] = struct{}{}
+	s.mu.Unlock()
+	cancel := func() {
+		s.mu.Lock()
+		delete(s.completions, sub)
+		s.mu.Unlock()
+		sub.once.Do(func() { close(sub.ch) })
+	}
+	return sub.ch, cancel
+}
+
+// publishCompletion hands a completion to every subscriber without waiting
+// on any of them.
+func (s *Service) publishCompletion(c RunCompletion) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	for sub := range s.completions {
+		select {
+		case sub.ch <- c:
+		default:
+		}
 	}
 }
 
@@ -189,13 +229,13 @@ func (s *Service) StartAdHocRun(ctx context.Context, ticketID, agent, prompt str
 			Summary:       summary,
 			ResumeCommand: resumeCommand,
 		})
-		s.completionCh <- RunCompletion{
+		s.publishCompletion(RunCompletion{
 			TicketID:      ticketID,
 			SessionID:     session.ID,
 			Outcome:       outcome,
 			Summary:       summary,
 			ResumeCommand: resumeCommand,
-		}
+		})
 	}
 
 	var handle RunHandle
@@ -247,10 +287,6 @@ func (s *Service) StartAdHocRun(ctx context.Context, ticketID, agent, prompt str
 	}
 
 	return session, nil
-}
-
-func (s *Service) CompletionChan() <-chan RunCompletion {
-	return s.completionCh
 }
 
 func (s *Service) CreateProposal(ctx context.Context, input CreateProposalInput) (store.Proposal, error) {
@@ -347,13 +383,13 @@ func (s *Service) StartApprovedRun(ctx context.Context, proposalID string) (stor
 			Summary:       summary,
 			ResumeCommand: resumeCommand,
 		})
-		s.completionCh <- RunCompletion{
+		s.publishCompletion(RunCompletion{
 			TicketID:      proposal.TicketID,
 			SessionID:     session.ID,
 			Outcome:       outcome,
 			Summary:       summary,
 			ResumeCommand: resumeCommand,
-		}
+		})
 	}
 
 	var handle RunHandle

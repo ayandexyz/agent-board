@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -106,8 +107,9 @@ func (f *fakeOrchestrator) SwitchToPane(sessionID string) error {
 	return fmt.Errorf("not implemented in fake")
 }
 
-func (f *fakeOrchestrator) CompletionChan() <-chan orchestrator.RunCompletion {
-	return f.completionCh
+func (f *fakeOrchestrator) SubscribeCompletions() (<-chan orchestrator.RunCompletion, func()) {
+	var once sync.Once
+	return f.completionCh, func() { once.Do(func() { close(f.completionCh) }) }
 }
 
 func (f *fakeOrchestrator) StartAdHocRun(ctx context.Context, ticketID, agent, prompt string) (store.Session, error) {

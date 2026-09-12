@@ -5,6 +5,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ayan-de/agent-board/internal/activity"
 	"github.com/ayan-de/agent-board/internal/orchestrator"
@@ -339,5 +340,75 @@ func TestStartAdHocRunOpencodeWithoutHookURLExportsNoConfig(t *testing.T) {
 	}
 	if _, ok := envValue(cr.last.Env, "OPENCODE_CONFIG"); ok {
 		t.Error("OPENCODE_CONFIG exported with no hook receiver configured")
+	}
+}
+
+func TestCompletionsFanOutToEverySubscriber(t *testing.T) {
+	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01"}}
+	runner := &fakeAsyncTmuxRunner{}
+	svc := orchestrator.NewService(fs, nil, nil, nil)
+	svc.SetAgentRunner(runner)
+
+	first, cancelFirst := svc.SubscribeCompletions()
+	second, cancelSecond := svc.SubscribeCompletions()
+	defer cancelSecond()
+
+	sess, err := svc.StartAdHocRun(context.Background(), "AGT-01", "opencode", "x")
+	if err != nil {
+		t.Fatal(err)
+	}
+	runner.onComplete("completed", "done", "")
+
+	for name, ch := range map[string]<-chan orchestrator.RunCompletion{"first": first, "second": second} {
+		select {
+		case c := <-ch:
+			if c.TicketID != "AGT-01" || c.SessionID != sess.ID || c.Outcome != "completed" {
+				t.Fatalf("%s got %+v", name, c)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("%s subscriber never received the completion", name)
+		}
+	}
+
+	cancelFirst()
+	if _, open := <-first; open {
+		t.Fatal("cancelled subscription was not closed")
+	}
+	runner.onComplete("completed", "again", "")
+	select {
+	case c := <-second:
+		if c.Summary != "again" {
+			t.Fatalf("second got %+v", c)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("surviving subscriber lost a completion after another cancelled")
+	}
+}
+
+func TestCompletionNeverBlocksTheAgent(t *testing.T) {
+	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01"}}
+	runner := &fakeAsyncTmuxRunner{}
+	svc := orchestrator.NewService(fs, nil, nil, nil)
+	svc.SetAgentRunner(runner)
+
+	slow, cancel := svc.SubscribeCompletions()
+	defer cancel()
+	_ = slow
+
+	if _, err := svc.StartAdHocRun(context.Background(), "AGT-01", "opencode", "x"); err != nil {
+		t.Fatal(err)
+	}
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		for i := 0; i < 200; i++ {
+			runner.onComplete("completed", "n", "")
+		}
+	}()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+		t.Fatal("onComplete blocked once nobody was draining completions")
 	}
 }

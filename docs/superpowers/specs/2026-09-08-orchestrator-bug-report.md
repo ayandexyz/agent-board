@@ -30,9 +30,13 @@ Fix: undo both on that path, same as the other error branches.
 ## High
 
 ### 5. Completion attributed to the wrong ticket
+**Fixed** on `fix/completion-delivery`: one board-wide listener reports the ticket and session carried by the completion; the start commands no longer listen.
+
 `internal/tui/app.go:537`. `startDirectRunAndListenCmd` discards the received `RunCompletion` and reports its own closure's ticket id. With two concurrent runs whichever listener wins the channel claims the other's completion. The sibling functions at 495 and 516 use `completion.TicketID` correctly.
 
 ### 6. Completion channel deadlock
+**Fixed**: `SubscribeCompletions` gives each consumer its own 64-deep buffer with non-blocking sends; `onComplete` can never block.
+
 `internal/orchestrator/service.go:49` and `128-135`. `completionCh` holds 16. The TUI reads one value per started run and abandons the read after 60 s. After 16 unread completions every later `onComplete` blocks forever on the send, holding the pane state.
 
 Fix: replace the shared channel with the event hub from the tracking design, or make the send non-blocking and drive the TUI from a subscription.
