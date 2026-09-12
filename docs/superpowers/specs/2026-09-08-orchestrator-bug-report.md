@@ -8,21 +8,29 @@ Scope: spawn, monitor, stop, completion, merge, store. Found during the activity
 ## Blocking (fix before activity tracking)
 
 ### 1. Nil pointer panic on unknown agent
+**Fixed** on `fix/orchestrator-blocking-bugs`: `Start` returns `ErrUnknownAgent` before any window is created.
+
 `internal/orchestrator/pty_runner.go:64`. `cfg := pty.GetConfig(req.Agent)` is nil for any agent outside the six registry keys. Line 52 guards `cfg != nil`, line 64 dereferences `cfg.Bin` unconditionally. Assigning a ticket to `cursor`, which `config.DetectAgents` advertises, crashes the whole TUI.
 
 Fix: return an error when `cfg == nil`. Add `cursor` to the registry or drop it from detection.
 
 ### 2. Monitor goroutine can never be cancelled
+**Fixed**: `RunHandle.Stop` cancels the monitor and prompt injection; `StopSession` calls it.
+
 `internal/orchestrator/pty_runner.go:138`. `case <-context.Background().Done():` is a channel that never fires. Each session leaks a goroutine executing three tmux commands every 500 ms forever. In tests the leaked goroutines from earlier cases consume the next case's fake tmux counters, which is the flaky failure.
 
 Fix: plumb the request context and a per-session cancel func through `RunHandle`; cancel in `StopSession`.
 
 ### 3. Stopping a session does not stop the agent
+**Fixed**: the runner keeps `sessionID -> paneID`, `Kill` runs `tmux kill-pane`, `GetPaneID` is real.
+
 `internal/orchestrator/service.go:377-396`. `StopSession` calls `StopPane` on `TmuxRunner`, but the live path never registers panes there, so `RemovePane` returns nil at `pane_manager.go:340`. The pane keeps running. When the agent later exits, the leaked monitor from bug 2 calls `onComplete`, which overwrites the `cancelled` session as `completed` and moves the ticket to review.
 
 Fix: `tmuxAgentRunner` keeps `sessionID -> paneID`; `StopSession` cancels the monitor and runs `tmux kill-pane`.
 
 ### 4. Ticket stuck active forever
+**Fixed**: the no-runner branch falls through to the error path that ends the session and clears the flag.
+
 `internal/orchestrator/service.go:148-150` and `303-305`. `SetAgentActive(true)` runs at line 107 / 264. The `no runner configured` branch returns without `EndSession` or `SetAgentActive(false)`. The ticket is permanently flagged, which blocks `MergeTicket` at `merge.go:74` and arms the animation ticker forever.
 
 Fix: undo both on that path, same as the other error branches.
@@ -53,6 +61,8 @@ Fix: hold `s.mu` across the check and mark the ticket merging; `StartAdHocRun` r
 ## Medium
 
 ### 10. Pane switching never works
+**Fixed** with bug 3; `SwitchToPane` now uses `select-window` on the pane target.
+
 `internal/orchestrator/pty_runner.go:210-212`. `GetPaneID` is a stub returning empty though the pane id is known at line 46. Fixing bug 3 fixes this.
 
 ### 11. Done ticket keeps a stale worktree

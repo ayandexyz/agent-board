@@ -341,3 +341,77 @@ func TestStartAdHocRunOpencodeWithoutHookURLExportsNoConfig(t *testing.T) {
 		t.Error("OPENCODE_CONFIG exported with no hook receiver configured")
 	}
 }
+
+type fakeAgentRunner struct {
+	stopped bool
+	killed  string
+}
+
+func (f *fakeAgentRunner) Start(_ context.Context, _ orchestrator.RunRequest) (orchestrator.RunHandle, error) {
+	return orchestrator.RunHandle{Outcome: "running", Stop: func() { f.stopped = true }}, nil
+}
+func (f *fakeAgentRunner) GetPaneID(string) (string, bool) { return "%1", true }
+func (f *fakeAgentRunner) Kill(id string) error            { f.killed = id; return nil }
+
+func TestStopSessionCancelsMonitorAndKillsPane(t *testing.T) {
+	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01"}}
+	fr := &fakeAgentRunner{}
+	svc := orchestrator.NewService(fs, nil, nil, nil)
+	svc.SetAgentRunner(fr)
+
+	sess, err := svc.StartAdHocRun(context.Background(), "AGT-01", "opencode", "do it")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !fs.lastAgentActive {
+		t.Fatal("precondition: ticket should be agent_active after start")
+	}
+	if err := svc.StopSession(context.Background(), sess.ID); err != nil {
+		t.Fatal(err)
+	}
+	if !fr.stopped {
+		t.Fatal("monitor was not cancelled")
+	}
+	if fr.killed != sess.ID {
+		t.Fatalf("Kill called with %q, want %q", fr.killed, sess.ID)
+	}
+	if fs.lastAgentActive {
+		t.Fatal("ticket still agent_active after StopSession")
+	}
+	if _, ok := svc.GetActiveSessionByTicket("AGT-01"); ok {
+		t.Fatal("session still listed as active after StopSession")
+	}
+}
+
+func TestStartAdHocRunWithoutRunnerClearsAgentActive(t *testing.T) {
+	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01"}}
+	svc := orchestrator.NewService(fs, nil, nil, nil)
+	_, err := svc.StartAdHocRun(context.Background(), "AGT-01", "opencode", "x")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if fs.lastAgentActive {
+		t.Fatal("agent_active left true after failed start")
+	}
+	if fs.lastEndStatus != "failed" {
+		t.Fatalf("session end status = %q, want failed", fs.lastEndStatus)
+	}
+}
+
+func TestStartApprovedRunWithoutRunnerClearsAgentActive(t *testing.T) {
+	fs := &fakeStore{
+		ticket:   store.Ticket{ID: "AGT-01", Agent: "opencode"},
+		proposal: store.Proposal{ID: "PRP-01", TicketID: "AGT-01", Agent: "opencode", Status: "approved", Prompt: "x"},
+	}
+	svc := orchestrator.NewService(fs, nil, nil, nil)
+	_, err := svc.StartApprovedRun(context.Background(), "PRP-01")
+	if err == nil {
+		t.Fatal("expected error")
+	}
+	if fs.lastAgentActive {
+		t.Fatal("agent_active left true after failed start")
+	}
+	if fs.lastEndStatus != "failed" {
+		t.Fatalf("session end status = %q, want failed", fs.lastEndStatus)
+	}
+}

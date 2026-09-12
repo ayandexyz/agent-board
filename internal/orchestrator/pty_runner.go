@@ -2,22 +2,31 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"os"
 	"os/exec"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/ayan-de/agent-board/internal/pty"
 )
 
+// ErrUnknownAgent is returned when a run names an agent the pty registry has
+// no launch recipe for. The window is never created, so nothing leaks.
+var ErrUnknownAgent = errors.New("orchestrator: unknown agent")
+
 type tmuxAgentRunner struct {
 	sessionName string
+	mu          sync.Mutex
+	panes       map[string]string
 }
 
 func NewTmuxAgentRunner(tmuxSession string) (*tmuxAgentRunner, error) {
 	return &tmuxAgentRunner{
 		sessionName: tmuxSession,
+		panes:       map[string]string{},
 	}, nil
 }
 
@@ -73,6 +82,11 @@ func agentCommand(bin string, args []string) string {
 }
 
 func (r *tmuxAgentRunner) Start(ctx context.Context, req RunRequest) (RunHandle, error) {
+	cfg := pty.GetConfig(req.Agent)
+	if cfg == nil {
+		return RunHandle{}, fmt.Errorf("%w: %q", ErrUnknownAgent, req.Agent)
+	}
+
 	sessionName := r.sessionName
 	if sessionName == "" {
 		sessionName = "agentboard-agents"
@@ -88,9 +102,11 @@ func (r *tmuxAgentRunner) Start(ctx context.Context, req RunRequest) (RunHandle,
 	parts := strings.Split(strings.TrimSpace(string(output)), ":")
 	paneID := parts[len(parts)-1]
 
-	_ = exec.Command("tmux", "set-option", "-p", "-t", paneID, "remain-on-exit", "on").Run()
+	r.mu.Lock()
+	r.panes[req.SessionID] = paneID
+	r.mu.Unlock()
 
-	cfg := pty.GetConfig(req.Agent)
+	_ = exec.Command("tmux", "set-option", "-p", "-t", paneID, "remain-on-exit", "on").Run()
 
 	cache := cacheDir()
 	promptFile := fmt.Sprintf("%s/prompt-%s.txt", cache, req.SessionID)
@@ -107,17 +123,22 @@ func (r *tmuxAgentRunner) Start(ctx context.Context, req RunRequest) (RunHandle,
 		return RunHandle{}, fmt.Errorf("send bin to pane: %w", err)
 	}
 
-	go r.injectPrompt(ctx, paneID, req.SessionID, cfg, promptFile)
+	// One cancel covers both goroutines: a stopped run must neither keep
+	// typing into the pane nor report a completion for an agent nobody is
+	// waiting on.
+	runCtx, cancel := context.WithCancel(ctx)
+	go r.injectPrompt(runCtx, paneID, req.SessionID, cfg, promptFile)
 
 	if req.Reporter != nil {
 		req.Reporter(fmt.Sprintf("Agent %s started in tmux pane %s", req.Agent, paneID))
 	}
 
-	go r.monitorPane(ctx, req.SessionID, paneID, cfg.Bin, req.OnComplete)
+	go r.monitorPane(runCtx, req.SessionID, paneID, cfg.Bin, req.OnComplete)
 
 	return RunHandle{
 		Outcome: "running",
 		Summary: fmt.Sprintf("Agent %s in pane %s", req.Agent, paneID),
+		Stop:    cancel,
 	}, nil
 }
 
@@ -188,6 +209,7 @@ func waitForReady(ctx context.Context, paneID string, cfg *pty.Config) error {
 func (r *tmuxAgentRunner) monitorPane(ctx context.Context, sessionID string, paneID string, agentBin string, onComplete func(outcome, summary, resumeCommand string)) {
 	ticker := time.NewTicker(500 * time.Millisecond)
 	defer ticker.Stop()
+	defer r.forget(sessionID)
 
 	var lastCaptured string
 	sawAgentRunning := false
@@ -266,7 +288,31 @@ func (r *tmuxAgentRunner) capturePaneOutput(paneID string, lines int) (string, e
 }
 
 func (r *tmuxAgentRunner) GetPaneID(sessionID string) (string, bool) {
-	return "", false
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p, ok := r.panes[sessionID]
+	return p, ok
+}
+
+// Kill tears down the pane a session runs in. A session the runner no longer
+// knows is already gone, which is the outcome the caller wanted.
+func (r *tmuxAgentRunner) Kill(sessionID string) error {
+	paneID, ok := r.forget(sessionID)
+	if !ok {
+		return nil
+	}
+	if err := exec.Command("tmux", "kill-pane", "-t", paneID).Run(); err != nil {
+		return fmt.Errorf("orchestrator.kill %s: %w", sessionID, err)
+	}
+	return nil
+}
+
+func (r *tmuxAgentRunner) forget(sessionID string) (string, bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	p, ok := r.panes[sessionID]
+	delete(r.panes, sessionID)
+	return p, ok
 }
 
 func shortID(s string, max int) string {

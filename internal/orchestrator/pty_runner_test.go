@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -589,5 +590,120 @@ func TestPtyRunnerWritesPromptVerbatim(t *testing.T) {
 	}
 	if string(raw) != want {
 		t.Errorf("prompt file = %q, want %q", raw, want)
+	}
+}
+
+func TestPtyRunnerStartRejectsUnknownAgent(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-test,123,0")
+	t.Setenv("HOME", t.TempDir())
+	tmuxDir := t.TempDir()
+	logFile := filepath.Join(tmuxDir, "tmux.log")
+	t.Setenv("FAKE_TMUX_LOG", logFile)
+	t.Setenv("PATH", tmuxDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	fakeTmux := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$FAKE_TMUX_LOG\"\ncase \"$1\" in new-window) printf '%%42\\n';; esac\n"
+	if err := os.WriteFile(filepath.Join(tmuxDir, "tmux"), []byte(fakeTmux), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	runner, _ := NewTmuxAgentRunner("agentboard")
+	_, err := runner.Start(testCtx(t), RunRequest{SessionID: "SES-01", Agent: "cursor", Prompt: "x"})
+	if !errors.Is(err, ErrUnknownAgent) {
+		t.Fatalf("Start() error = %v, want ErrUnknownAgent", err)
+	}
+	if raw, _ := os.ReadFile(logFile); strings.Contains(string(raw), "new-window") {
+		t.Fatalf("a window was created for an unknown agent:\n%s", raw)
+	}
+}
+
+func TestPtyRunnerStopCancelsMonitor(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-test,123,0")
+	t.Setenv("HOME", t.TempDir())
+	tmuxDir := t.TempDir()
+	logFile := filepath.Join(tmuxDir, "tmux.log")
+	t.Setenv("FAKE_TMUX_LOG", logFile)
+	t.Setenv("PATH", tmuxDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	fakeTmux := `#!/bin/sh
+printf '%s\n' "$*" >> "$FAKE_TMUX_LOG"
+case "$1" in
+  new-window) printf '%%42\n' ;;
+  capture-pane) printf 'Ask anything\n' ;;
+  list-panes) printf '123:0:opencode\n' ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(tmuxDir, "tmux"), []byte(fakeTmux), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	completed := make(chan struct{}, 1)
+	runner, _ := NewTmuxAgentRunner("agentboard")
+	handle, err := runner.Start(context.Background(), RunRequest{
+		SessionID:  "SES-02",
+		Agent:      "opencode",
+		Prompt:     "x",
+		OnComplete: func(string, string, string) { completed <- struct{}{} },
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if handle.Stop == nil {
+		t.Fatal("RunHandle.Stop is nil")
+	}
+	handle.Stop()
+	time.Sleep(1200 * time.Millisecond)
+
+	before, _ := os.ReadFile(logFile)
+	time.Sleep(1200 * time.Millisecond)
+	after, _ := os.ReadFile(logFile)
+	if len(after) != len(before) {
+		t.Fatalf("monitor kept running after Stop: log grew from %d to %d bytes", len(before), len(after))
+	}
+	select {
+	case <-completed:
+		t.Fatal("OnComplete fired after Stop")
+	default:
+	}
+}
+
+func TestPtyRunnerGetPaneIDAndKill(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-test,123,0")
+	t.Setenv("HOME", t.TempDir())
+	tmuxDir := t.TempDir()
+	logFile := filepath.Join(tmuxDir, "tmux.log")
+	t.Setenv("FAKE_TMUX_LOG", logFile)
+	t.Setenv("PATH", tmuxDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	fakeTmux := `#!/bin/sh
+printf '%s\n' "$*" >> "$FAKE_TMUX_LOG"
+case "$1" in
+  new-window) printf '@7:%%42\n' ;;
+  capture-pane) printf 'Ask anything\n' ;;
+  list-panes) printf '1:0:opencode\n' ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(tmuxDir, "tmux"), []byte(fakeTmux), 0755); err != nil {
+		t.Fatal(err)
+	}
+	runner, _ := NewTmuxAgentRunner("agentboard")
+	handle, err := runner.Start(testCtx(t), RunRequest{SessionID: "SES-03", Agent: "opencode", Prompt: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer handle.Stop()
+
+	pane, ok := runner.GetPaneID("SES-03")
+	if !ok || pane != "%42" {
+		t.Fatalf("GetPaneID = %q,%v want %%42,true", pane, ok)
+	}
+	if err := runner.Kill("SES-03"); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(logFile)
+	if !strings.Contains(string(raw), "kill-pane -t %42") {
+		t.Fatalf("expected kill-pane in log, got:\n%s", raw)
+	}
+	if _, ok := runner.GetPaneID("SES-03"); ok {
+		t.Fatal("pane still registered after Kill")
+	}
+	if err := runner.Kill("SES-03"); err != nil {
+		t.Fatalf("Kill on a forgotten session = %v, want nil", err)
 	}
 }

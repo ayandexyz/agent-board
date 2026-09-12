@@ -58,6 +58,9 @@ type Worktrees interface {
 type RunHandle struct {
 	Outcome string
 	Summary string
+	// Stop cancels the run's monitor and prompt injection. Nil when the
+	// runner finished synchronously and there is nothing left to stop.
+	Stop func()
 }
 
 type RunCompletion struct {
@@ -80,6 +83,7 @@ type Runner interface {
 type AgentRunner interface {
 	Start(ctx context.Context, req RunRequest) (RunHandle, error)
 	GetPaneID(sessionID string) (string, bool)
+	Kill(sessionID string) error
 }
 
 type Store interface {
