@@ -56,11 +56,10 @@ agent-board/
 │   │   ├── client.go       # Shared MCP client bootstrap and registry
 │   │   ├── contextcarry.go # ContextCarry MCP server integration
 │   │   └── sessioncarry.go # SessionCarry MCP server integration
-│   ├── api/                # HTTP + WebSocket API server
-│   │   ├── server.go       # chi router setup, server lifecycle
-│   │   ├── handlers.go     # REST handlers (tickets, sessions, agents)
-│   │   ├── websocket.go    # WebSocket hub and real-time event streaming
-│   │   └── middleware.go   # CORS, logging, recovery middleware
+│   ├── api/                # Loopback HTTP API over the orchestrator
+│   │   ├── server.go       # Server, Board/Activity interfaces, loopback guard
+│   │   ├── handlers.go     # REST handlers under /api/v1
+│   │   └── events.go       # Event hub and SSE /events stream
 │   ├── store/              # SQLite persistence
 │   │   ├── sqlite.go       # DB connection, initialization, migrations
 │   │   ├── tickets.go      # Ticket CRUD operations
@@ -99,7 +98,9 @@ agent-board/
 | **Everything in internal/ until needed externally** | `apitypes` and `mcpclient` stay in `internal/` — will graduate to `pkg/` when the Next.js frontend becomes a real external consumer. No premature abstraction. |
 | **Interfaces defined where used** | `orchestrator` defines `AgentSpawner`; `internal/tui` defines `Renderer`. Implementations live in their own package. Prevents circular imports. |
 | **modernc.org/sqlite over CGO sqlite** | Pure Go, compiles on Termux (Android ARM64) without a C toolchain. Opened in WAL mode with a 5 s busy timeout (`store.dsn`) so a CLI command and the TUI can share the file. |
-| **chi over stdlib mux** | Lightweight, idiomatic, compatible with `net/http` handlers. Easy middleware stacking. |
+| **stdlib `http.ServeMux` over chi** | Go 1.22 method+path patterns cover every route; no extra dependency for Termux builds. |
+| **Container / presentation** | `orchestrator.Service` is the one container: every rule (first-column create, branch-mode switch, status moves, merges) lives there. `internal/tui` and `internal/api` are two presentations of it and hold no `*store.Store`. A rule that only one front end knows is a bug. |
+| **API binds loopback only** | `api.Server.Start` refuses a non-loopback address. A phone reaches it over an SSH port forward or a tailnet, so the API needs no auth of its own. |
 | **bubbletea + custom pane over pure tmux** | Toggle between tmux-managed panes (for existing tmux users) and embedded PTY panes (for standalone usage). User chooses at startup. |
 | **TOML config + env vars** | TOML for persistent user preferences; env vars for CI/overrides. Env vars take precedence. |
 | **Error wrapping with `fmt.Errorf("context: %w", err)`** | Consistent error chain for debugging. Every package wraps errors at boundary points. |
@@ -118,8 +119,11 @@ go build -o agentboard ./cmd/agentboard
 # Run (TUI mode, default)
 ./agentboard
 
-# Run (API-only mode, for Next.js frontend)
-./agentboard --api --addr :8080
+# The HTTP API starts with the TUI on 127.0.0.1:7878 ([general] addr / api)
+curl localhost:7878/api/v1/board
+curl -N localhost:7878/api/v1/events
+# From another machine, through SSH:
+ssh -L 7878:127.0.0.1:7878 host   # then the same curls locally
 
 # Initialize config
 ./agentboard init
@@ -375,6 +379,61 @@ See `docs/superpowers/specs/2026-09-08-agent-activity-tracking-design.md` and `d
 
 ---
 
+## HTTP API
+
+`internal/api` is the second presentation of the orchestrator, started in
+`runTUI` next to the activity receiver when `[general] api = true`
+(default). It binds `[general] addr`, default `127.0.0.1:7878`, and
+`Start` refuses anything that is not loopback: a remote client (the
+planned iOS app, a script) reaches it through `ssh -L` or a tailnet, so
+the API carries no token of its own. It runs inside the TUI process
+because active sessions live in the orchestrator's memory, not SQLite.
+
+`api.Board` is the interface the server needs from `orchestrator.Service`
+and `api.Activity` what it needs from `activity.Receiver`; both are
+consumer-side interfaces with test fakes in `api_test.go`. DTOs live in
+`internal/apitypes` with no board imports so a client can vendor them.
+
+Routes, all under `/api/v1`:
+
+| Route | Does |
+|---|---|
+| `GET /identity` | name, version, project, tmux session |
+| `GET /board` | tickets grouped by configured status, each with its live `activity` and `session_id`; `waiting` count |
+| `GET /tickets?status=&search=` · `POST /tickets` | list / create (lands in the first column) |
+| `GET` · `PATCH` · `DELETE /tickets/{id}` | read / partial edit (status and branch mode excluded) / delete |
+| `POST /tickets/{id}/status` `{status}` | `MoveTicketStatus` |
+| `POST /tickets/{id}/branch-mode` `{mode}` | `SetBranchMode`: `current` clears the branch, `worktree` names the default |
+| `POST /tickets/{id}/start` `{agent?, prompt?}` | `StartAdHocRun` on the ticket's own agent and prompt unless overridden |
+| `POST /tickets/{id}/complete` | `CompleteTicket`; `409` with `merge_required` when unmerged work exists |
+| `POST /tickets/{id}/merge` `{strategy?}` | `MergeTicket` |
+| `GET /sessions` | active sessions with tmux window, activity state, held tool and `decidable` |
+| `GET /sessions/{id}/screen?lines=` | `capture-pane` text |
+| `POST /sessions/{id}/stop` · `/input` `{text}` · `/resolve` `{decision}` | stop, type into the pane (refused `409` while blocked/exited), answer a held permission |
+| `GET /events?after=<seq>` | SSE stream |
+
+Errors map sentinels to status codes: `store.ErrNotFound` 404;
+`ErrInvalidStatus`, `ErrInvalidPriority`, `ErrTitleRequired`,
+`ErrInvalidBranchMode`, `ErrUnknownAgent` 400; `ErrTicketBusy`,
+`ErrInputSuppressed` 409.
+
+The event stream is an in-memory ring of the last 256 events with a
+process-wide sequence. `run.completed` comes from
+`Service.SubscribeCompletions`, `activity.alert` from
+`Receiver.Subscribe`, and the API publishes `ticket.created`,
+`ticket.changed`, `ticket.deleted`, `ticket.merged`, `session.started`,
+`session.stopped`, `permission.resolved` for its own mutations. Edits made
+in the TUI are not on the stream yet; a client refreshes `/board` on any
+event or on an interval. A reconnecting client sends `?after=` or
+`Last-Event-ID`; older than the ring it must refetch the board.
+
+Not built yet: a headless `agentboard serve` for machines with no TUI,
+TUI-side mutations on the stream, and push notifications (SSH cannot wake
+a phone in the background; see
+`docs/superpowers/specs/2026-09-12-mobile-client-design.md`).
+
+---
+
 ## Git Worktree Isolation & Merge Flow
 
 Every ticket gets an isolated git worktree when an agent starts on it, so parallel agents never collide on the filesystem.
@@ -486,8 +545,9 @@ Backlog -> In Progress            -> Review              -> Done
 | `AGENTBOARD_CONFIG` | `~/.agentboard/config.toml` | Path to config file |
 | `AGENTBOARD_DB` | `~/.agentboard/board.db` | SQLite database path |
 | `AGENTBOARD_LOG` | `info` | Log level: `debug`, `info`, `warn`, `error` |
-| `AGENTBOARD_ADDR` | `:8080` | API server bind address |
-| `AGENTBOARD_MODE` | `tui` | Startup mode: `tui`, `api`, `both` |
+| `AGENTBOARD_ADDR` | `127.0.0.1:7878` | HTTP API bind address; must be loopback |
+| `AGENTBOARD_API` | `on` | `off` disables the HTTP API |
+| `AGENTBOARD_MODE` | `tui` | Startup mode: `tui`, `api`, `both` (only `tui` is implemented) |
 | `AGENTBOARD_TMUX` | `auto` | tmux usage: `auto`, `always`, `never` |
 | `AGENTBOARD_LLM_PROVIDER` | — | LLM provider for decomposition: `openai`, `anthropic`, `ollama` |
 | `AGENTBOARD_LLM_MODEL` | — | Model name (e.g., `gpt-4o`, `claude-sonnet-4-20250514`) |

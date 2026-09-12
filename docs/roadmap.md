@@ -99,19 +99,21 @@ split-below:          split-right:         floating:         tabbed:
 
 ---
 
-## Phase 6 — HTTP/WebSocket API
+## Phase 6 — HTTP API (done 2026-09-12)
 
-> Remote control for Next.js frontend.
+> Remote control for a thin client (iOS app over SSH/Tailscale, scripts).
 
 | Step | Package | What |
 |------|---------|------|
-| 6.1 | `api/server.go` | Chi router, CORS, middleware |
-| 6.2 | `api/handlers.go` | REST: tickets, sessions, agents CRUD |
-| 6.3 | `api/websocket.go` | Real-time event streaming (board updates) |
-| 6.4 | `apitypes/` | Shared DTOs |
-| 6.5 | `cmd/agentboard/main.go` | `--api` mode flag |
+| 6.1 | `orchestrator/tickets.go` | Ticket rules moved into the container so TUI and API share them |
+| 6.2 | `tui/` | Views take a `Board` interface; no `*store.Store` in the TUI |
+| 6.3 | `api/server.go` | stdlib mux, loopback-only listener, `Board`/`Activity` interfaces |
+| 6.4 | `api/handlers.go` | REST under `/api/v1`: board, tickets, sessions, permissions |
+| 6.5 | `api/events.go` | SSE `/events` with `?after=` replay |
+| 6.6 | `apitypes/` | Shared DTOs |
+| 6.7 | `config` | `[general] addr` / `api`, started in `runTUI` |
 
-**Milestone**: `curl localhost:8080/api/tickets` returns board state. WebSocket streams live updates.
+**Milestone**: `curl localhost:7878/api/v1/board` returns board state; `/events` streams completions and alerts. Remaining: headless `agentboard serve`, TUI mutations on the stream.
 
 ---
 
