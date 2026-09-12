@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"sort"
 	"strings"
 	"time"
 
@@ -149,8 +150,18 @@ type Orchestrator interface {
 	CompletionChan() <-chan orchestrator.RunCompletion
 }
 
+// ActivityReader is what the board asks about agent state. The hook receiver
+// satisfies it; nil means no receiver is running and cards show no glyph.
+type ActivityReader interface {
+	StateOf(sessionID string) activity.State
+	Waiting() []activity.Session
+}
+
 type AppDeps struct {
 	Orchestrator Orchestrator
+	// Activity answers "what is this session doing" for the card glyphs and
+	// the waiting overlay. Nil when no receiver is running.
+	Activity ActivityReader
 	// ActivityEvents delivers "agent needs you" alerts from the hook receiver.
 	// Nil when no receiver is running.
 	ActivityEvents <-chan activity.Alert
@@ -182,6 +193,10 @@ type App struct {
 
 	activityEvents    <-chan activity.Alert
 	resolvePermission func(sessionID, decision string)
+	activityReader    ActivityReader
+	activityByTicket  map[string]string
+	waitingCount      int
+	waiting           WaitingOverlay
 
 	quit       bool
 	runCommand tea.Cmd
@@ -225,6 +240,8 @@ func NewApp(cfg *config.Config, s *store.Store, reg *theme.Registry, deps AppDep
 		orchestrator:        deps.Orchestrator,
 		activityEvents:      deps.ActivityEvents,
 		resolvePermission:   deps.ResolvePermission,
+		activityReader:      deps.Activity,
+		activityByTicket:    map[string]string{},
 		resolver:            resolver,
 		config:              cfg,
 		registry:            reg,
@@ -254,6 +271,8 @@ func NewApp(cfg *config.Config, s *store.Store, reg *theme.Registry, deps AppDep
 	a.textInput.SetTheme(t)
 	a.notification = NotificationStack{}
 	a.notification.SetTheme(t)
+	a.waiting = WaitingOverlay{}
+	a.waiting.SetTheme(t)
 
 	return a, nil
 }
@@ -269,6 +288,73 @@ func (a *App) applyTheme() {
 	a.mergeModal.SetTheme(t)
 	a.textInput.SetTheme(t)
 	a.notification.SetTheme(t)
+	a.waiting.SetTheme(t)
+}
+
+// refreshActivity rebuilds the per-ticket state the cards show and the count
+// in the header from the live sessions and what the receiver knows about
+// each. Cheap enough to run on every animation tick: a few map lookups.
+func (a *App) refreshActivity() {
+	byTicket := map[string]string{}
+	waiting := 0
+	if a.activityReader != nil {
+		for _, sess := range a.orchestrator.GetActiveSessions() {
+			state := a.activityReader.StateOf(sess.SessionID)
+			if state == "" {
+				continue
+			}
+			if state.NeedsInput() {
+				waiting++
+			}
+			if sess.TicketID != "" {
+				byTicket[sess.TicketID] = string(state)
+			}
+		}
+	}
+	a.activityByTicket = byTicket
+	a.waitingCount = waiting
+	a.kanban = a.kanban.WithActivity(byTicket)
+}
+
+// waitingItems is what the overlay lists: every session the receiver says
+// needs a human, named by its ticket where it has one.
+func (a *App) waitingItems() []WaitingItem {
+	if a.activityReader == nil {
+		return nil
+	}
+	ticketOf := map[string]string{}
+	for _, sess := range a.orchestrator.GetActiveSessions() {
+		ticketOf[sess.SessionID] = sess.TicketID
+	}
+	var items []WaitingItem
+	for _, s := range a.activityReader.Waiting() {
+		items = append(items, WaitingItem{
+			SessionID: s.ID,
+			TicketID:  ticketOf[s.ID],
+			State:     string(s.State),
+			ToolName:  s.ToolName,
+			Detail:    s.Detail,
+			Decidable: s.Decidable && a.resolvePermission != nil,
+		})
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].TicketID != items[j].TicketID {
+			return items[i].TicketID < items[j].TicketID
+		}
+		return items[i].SessionID < items[j].SessionID
+	})
+	return items
+}
+
+// reopenWaiting refreshes the overlay after a decision and closes it once
+// nothing is left to decide.
+func (a *App) reopenWaiting() {
+	items := a.waitingItems()
+	if len(items) == 0 {
+		a.waiting.Close()
+		return
+	}
+	a.waiting.Open(items)
 }
 
 // openPermissionModal asks the user to approve the tool call an agent is
@@ -332,6 +418,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		a.mergeModal.SetSize(a.width, a.height)
 		a.textInput.SetSize(a.width, a.height)
 		a.notification.SetSize(a.width, a.height)
+		a.waiting.SetSize(a.width, a.height)
 		return a, nil
 	case tea.KeyMsg:
 		return a.handleKey(msg)
@@ -341,6 +428,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		var cmd tea.Cmd
 		a.kanban, cmd = a.kanban.Update(msg)
 		a.dashboard, _ = a.dashboard.Update(msg)
+		a.refreshActivity()
 
 		return a, cmd
 	case notificationDismissMsg:
@@ -413,6 +501,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		)
 	case runCompletedMsg:
 		a.kanban, _ = a.kanban.Reload()
+		a.refreshActivity()
 		if a.activeTicket != nil && a.activeTicket.ID == msg.ticketID {
 			updated, err := a.store.GetTicket(context.Background(), msg.ticketID)
 			if err == nil {
@@ -427,6 +516,7 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// store. Reload the kanban so the activity bar starts animating, and
 		// arm the tick.
 		a.kanban, _ = a.kanban.Reload()
+		a.refreshActivity()
 		return a, a.tickCmd()
 	case runStartFailedMsg:
 		return a, a.showNotification("Run failed", msg.err.Error(), NotificationError)
@@ -482,6 +572,10 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if msg.State == activity.StateBlocked {
 			variant = NotificationError
 		}
+		a.refreshActivity()
+		if a.waiting.Active() {
+			a.reopenWaiting()
+		}
 		next := a.waitForActivityCmd()
 		if msg.Decidable && a.resolvePermission != nil && !a.modal.Active() {
 			a.openPermissionModal(msg)
@@ -492,6 +586,20 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			next,
 		)
 
+	case waitingResolveMsg:
+		if a.resolvePermission != nil {
+			a.resolvePermission(msg.sessionID, msg.decision)
+		}
+		a.refreshActivity()
+		a.reopenWaiting()
+		return a, a.tickCmd()
+	case waitingJumpMsg:
+		if err := a.orchestrator.SwitchToPane(msg.sessionID); err != nil {
+			return a, a.showNotification("Cannot switch pane", err.Error(), NotificationError)
+		}
+		return a, a.tickCmd()
+	case waitingClosedMsg:
+		return a, a.tickCmd()
 	case notificationMsg:
 		return a, a.showNotification(msg.title, msg.message, msg.variant)
 	case searchQueryMsg:
@@ -729,6 +837,11 @@ func (a *App) createProposalCmd(ticketID string) tea.Cmd {
 }
 
 func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	if a.waiting.Active() {
+		var cmd tea.Cmd
+		a.waiting, cmd = a.waiting.Update(msg)
+		return a, cmd
+	}
 	if a.mergeModal.Active() {
 		var cmd tea.Cmd
 		a.mergeModal, cmd = a.mergeModal.Update(msg)
@@ -845,6 +958,10 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 	case keybinding.ActionOpenPalette:
 		a.palette.Open()
+	case keybinding.ActionShowWaiting:
+		a.refreshActivity()
+		a.waiting.Open(a.waitingItems())
+		return a, nil
 	case keybinding.ActionRefresh:
 		newCfg, err := config.LoadFromDir(config.GetBaseDir(), a.config.ProjectName)
 		if err == nil {
@@ -903,6 +1020,15 @@ func (a *App) renderHeader() string {
 
 	hintPart := hintStyle.Render(km.BindingsForActions(keybinding.ActionAddTicket, keybinding.ActionDeleteTicket))
 	projectPart := labelStyle.Render("  Project: ") + nameStyle.Render(name)
+	if a.waitingCount > 0 {
+		warn := lipgloss.Color("214")
+		if t != nil && t.Warning != "" {
+			warn = t.Warning
+		}
+		waitStyle := lipgloss.NewStyle().Bold(true).Foreground(warn)
+		projectPart += waitStyle.Render(fmt.Sprintf("   %d waiting", a.waitingCount)) +
+			hintStyle.Render(" ("+km.GetByAction(keybinding.ActionShowWaiting)+")")
+	}
 	hintPart2 := hintStyle.Render(km.BindingsForActions(keybinding.ActionShowHelp, keybinding.ActionRefresh))
 
 	projectWidth := lipgloss.Width(projectPart)
@@ -983,6 +1109,10 @@ func (a *App) View() string {
 			}
 		}
 		mainView = finalView.String()
+	}
+
+	if a.waiting.Active() {
+		return overlayCentered(mainView, a.waiting.ViewBox(), a.width, a.height)
 	}
 
 	if a.mergeModal.Active() {
@@ -1199,4 +1329,41 @@ func (a *App) renderHelp() string {
 	}
 	fmt.Fprint(&b, "\nPress ? to return")
 	return b.String()
+}
+
+// overlayCentered draws box over the middle of background, the same way the
+// modals are composited.
+func overlayCentered(background, box string, width, height int) string {
+	boxHeight := lipgloss.Height(box)
+	boxWidth := lipgloss.Width(box)
+	bgLines := strings.Split(background, "\n")
+	for len(bgLines) < height {
+		bgLines = append(bgLines, "")
+	}
+	startY := (height - boxHeight) / 2
+	startX := (width - boxWidth) / 2
+	if startY < 0 {
+		startY = 0
+	}
+	if startX < 0 {
+		startX = 0
+	}
+	boxLines := strings.Split(box, "\n")
+
+	var out strings.Builder
+	for i := 0; i < height; i++ {
+		bgLine := ""
+		if i < len(bgLines) {
+			bgLine = bgLines[i]
+		}
+		if i >= startY && i < startY+boxHeight {
+			out.WriteString(overlayLine(bgLine, boxLines[i-startY], startX))
+		} else {
+			out.WriteString(bgLine)
+		}
+		if i < height-1 {
+			out.WriteString("\n")
+		}
+	}
+	return out.String()
 }

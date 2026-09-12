@@ -32,6 +32,7 @@ type fakeOrchestrator struct {
 	lastMergeStrategy orchestrator.MergeStrategy
 	deleteErr         error
 	lastDeletedTicket string
+	lastSwitchedPane  string
 }
 
 func newFakeOrchestrator(s *store.Store) *fakeOrchestrator {
@@ -103,7 +104,8 @@ func (f *fakeOrchestrator) GetPaneContent(sessionID string, lines int) (string, 
 }
 
 func (f *fakeOrchestrator) SwitchToPane(sessionID string) error {
-	return fmt.Errorf("not implemented in fake")
+	f.lastSwitchedPane = sessionID
+	return nil
 }
 
 func (f *fakeOrchestrator) CompletionChan() <-chan orchestrator.RunCompletion {

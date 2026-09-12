@@ -17,6 +17,10 @@ type Session struct {
 	State    State
 	ToolName string
 	Detail   string
+	// Decidable is true while a hook holds this session's permission request
+	// open, so Resolve can answer it. A question is never decidable: the
+	// answer is typed in the pane.
+	Decidable bool
 }
 
 // Alert is one "this session needs a human" event, ready to render.
@@ -130,7 +134,9 @@ func (r *Receiver) Waiting() []Session {
 	var out []Session
 	for _, s := range r.sessions {
 		if s.State.NeedsInput() {
-			out = append(out, *s)
+			c := *s
+			_, c.Decidable = r.pending[s.ID]
+			out = append(out, c)
 		}
 	}
 	return out

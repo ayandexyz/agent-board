@@ -143,3 +143,34 @@ func TestQuestionPermissionIsNotHeldForADecision(t *testing.T) {
 		t.Fatal("no alert raised for the question")
 	}
 }
+
+func TestWaitingReportsWhetherDecidable(t *testing.T) {
+	r, base, _ := newRunning(t)
+	r.PermissionTimeout = time.Second
+
+	post(t, base, "q1", "", `{"hook_event_name":"PermissionRequest","tool_name":"AskUserQuestion","tool_input":{"questions":[{"question":"Which?"}]}}`)
+	held := make(chan string, 1)
+	go func() {
+		held <- postRaw(t, base, "p1", `{"hook_event_name":"PermissionRequest","tool_name":"Bash","tool_input":{"command":"ls"}}`)
+	}()
+
+	deadline := time.Now().Add(time.Second)
+	for r.StateOf("p1") != StateBlocked {
+		if time.Now().After(deadline) {
+			t.Fatal("p1 never blocked")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	byID := map[string]Session{}
+	for _, s := range r.Waiting() {
+		byID[s.ID] = s
+	}
+	if !byID["p1"].Decidable {
+		t.Fatalf("held permission not decidable: %+v", byID["p1"])
+	}
+	if byID["q1"].Decidable {
+		t.Fatalf("question reported decidable: %+v", byID["q1"])
+	}
+	r.Resolve("p1", "deny")
+	<-held
+}

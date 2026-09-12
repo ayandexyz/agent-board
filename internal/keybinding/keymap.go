@@ -129,6 +129,7 @@ func DefaultKeyMap() KeyMap {
 			{Key: "i", Action: ActionShowDashboard, Description: "show dashboard"},
 			{Key: "e", Action: ActionInteract, Description: "edit"},
 			{Key: "w", Action: ActionSwitchToPane, Description: "switch to pane"},
+			{Key: "W", Action: ActionShowWaiting, Description: "waiting agents"},
 			{Key: ":", Action: ActionOpenPalette, Description: "open palette"},
 			{Key: "alt+1", Action: ActionJumpSession1, Description: "jump session 1"},
 			{Key: "alt+2", Action: ActionJumpSession2, Description: "jump session 2"},
