@@ -138,6 +138,7 @@ func runTUI() int {
 		fmt.Fprintf(os.Stderr, "error creating app: %v\n", err)
 		return 1
 	}
+	defer app.Close()
 
 	p := tea.NewProgram(app, tea.WithAltScreen())
 	if _, err := p.Run(); err != nil {
