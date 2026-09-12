@@ -179,5 +179,34 @@ func (s *Store) migrate() error {
 		}
 	}
 
+	for _, col := range []struct{ name, ddl string }{
+		{"activity_state", "ALTER TABLE sessions ADD COLUMN activity_state TEXT DEFAULT ''"},
+		{"activity_at", "ALTER TABLE sessions ADD COLUMN activity_at DATETIME"},
+		{"launch_id", "ALTER TABLE sessions ADD COLUMN launch_id TEXT DEFAULT ''"},
+	} {
+		err = s.db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('sessions') WHERE name=?", col.name).Scan(&hasCol)
+		if err == nil && !hasCol {
+			if _, err = s.db.Exec(col.ddl); err != nil {
+				return err
+			}
+		}
+	}
+
+	_, err = s.db.Exec(`CREATE TABLE IF NOT EXISTS pending_requests (
+		id          TEXT PRIMARY KEY,
+		session_id  TEXT NOT NULL,
+		ticket_id   TEXT DEFAULT '',
+		kind        TEXT NOT NULL,
+		tool_name   TEXT DEFAULT '',
+		tool_input  TEXT DEFAULT '',
+		created_at  DATETIME NOT NULL,
+		resolved_at DATETIME,
+		decision    TEXT DEFAULT ''
+	);
+	CREATE INDEX IF NOT EXISTS idx_pending_requests_open ON pending_requests(resolved_at);`)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }
