@@ -25,6 +25,7 @@ type Service struct {
 	worktrees     Worktrees
 	merger        Merger
 	mergeStrategy MergeStrategy
+	branchPrefix  string
 	logs          map[string][]string
 	mu            sync.RWMutex
 

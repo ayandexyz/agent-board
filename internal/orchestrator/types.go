@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"context"
+	"time"
 
 	"github.com/ayan-de/agent-board/internal/llm"
 	"github.com/ayan-de/agent-board/internal/store"
@@ -89,6 +90,14 @@ type AgentRunner interface {
 
 type Store interface {
 	GetTicket(ctx context.Context, id string) (store.Ticket, error)
+	ListTickets(ctx context.Context, f store.TicketFilters) ([]store.Ticket, error)
+	CreateTicket(ctx context.Context, t store.Ticket) (store.Ticket, error)
+	UpdateTicket(ctx context.Context, t store.Ticket) (store.Ticket, error)
+	Statuses() []string
+	SetTicketPrefix(prefix string)
+	ProjectInitDate(ctx context.Context) (time.Time, error)
+	GetActiveProposalForTicket(ctx context.Context, ticketID string) (store.Proposal, error)
+	ListActiveSessions(ctx context.Context) ([]store.Session, error)
 	CreateProposal(ctx context.Context, p store.Proposal) (store.Proposal, error)
 	GetProposal(ctx context.Context, id string) (store.Proposal, error)
 	UpdateProposalStatus(ctx context.Context, id, status string) error

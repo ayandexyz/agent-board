@@ -29,6 +29,8 @@ type fakeStore struct {
 	lastPRURL        string
 	deletedTicketID  string
 	events           []store.Event
+	statuses         []string
+	createdTicket    store.Ticket
 }
 
 func (f *fakeStore) GetTicket(_ context.Context, _ string) (store.Ticket, error) {
@@ -223,3 +225,27 @@ func (c *capturingRunner) Start(_ context.Context, req orchestrator.RunRequest) 
 func (c *capturingRunner) GetPaneID(_ string) (string, bool) { return "", false }
 func (c *capturingRunner) Kill(_ string) error               { return nil }
 func (c *capturingRunner) SendInput(_, _ string) error       { return nil }
+
+func (f *fakeStore) ListTickets(_ context.Context, _ store.TicketFilters) ([]store.Ticket, error) {
+	return []store.Ticket{f.ticket}, nil
+}
+func (f *fakeStore) CreateTicket(_ context.Context, t store.Ticket) (store.Ticket, error) {
+	t.ID = "AGT-01"
+	f.createdTicket = t
+	return t, nil
+}
+func (f *fakeStore) UpdateTicket(_ context.Context, t store.Ticket) (store.Ticket, error) {
+	f.ticket = t
+	return t, nil
+}
+func (f *fakeStore) Statuses() []string       { return f.statuses }
+func (f *fakeStore) SetTicketPrefix(_ string) {}
+func (f *fakeStore) ProjectInitDate(_ context.Context) (time.Time, error) {
+	return time.Time{}, nil
+}
+func (f *fakeStore) GetActiveProposalForTicket(_ context.Context, _ string) (store.Proposal, error) {
+	return f.proposal, nil
+}
+func (f *fakeStore) ListActiveSessions(_ context.Context) ([]store.Session, error) {
+	return nil, nil
+}

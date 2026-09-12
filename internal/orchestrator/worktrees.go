@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"strings"
 	"sync"
 
 	"github.com/ayan-de/agent-board/internal/git"
@@ -53,7 +52,7 @@ func (m *WorktreeManager) branchFor(t store.Ticket) string {
 	if t.Branch != "" {
 		return t.Branch
 	}
-	return m.branchPrefix + strings.ToLower(t.ID)
+	return DefaultBranchName(m.branchPrefix, t.ID)
 }
 
 func (m *WorktreeManager) pathFor(t store.Ticket) string {
