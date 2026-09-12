@@ -113,9 +113,10 @@ func runTUI() int {
 
 	if cfg.General.API {
 		apiServer := &api.Server{
-			Addr:     cfg.General.Addr,
-			Board:    orch,
-			Activity: apiActivity,
+			Addr:      cfg.General.Addr,
+			Board:     orch,
+			Activity:  apiActivity,
+			Terminals: tmuxTerminals{session: sessionName},
 			Identity: api.Identity{
 				Name:        "agentboard",
 				Version:     version.Version,

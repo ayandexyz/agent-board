@@ -8,6 +8,7 @@ require (
 	github.com/charmbracelet/bubbletea v1.3.10
 	github.com/charmbracelet/lipgloss v1.1.0
 	github.com/charmbracelet/x/ansi v0.11.6
+	github.com/coder/websocket v1.8.15
 	github.com/creack/pty v1.1.24
 	github.com/google/uuid v1.6.0
 	github.com/mark3labs/mcp-go v0.48.0

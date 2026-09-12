@@ -34,7 +34,9 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/v1/tickets/{id}/complete", s.handleComplete)
 	m.HandleFunc("POST /api/v1/tickets/{id}/merge", s.handleMerge)
 
+	m.HandleFunc("GET /api/v1/terminal", s.handleTerminal)
 	m.HandleFunc("GET /api/v1/sessions", s.handleListSessions)
+	m.HandleFunc("GET /api/v1/sessions/{id}/terminal", s.handleSessionTerminal)
 	m.HandleFunc("GET /api/v1/sessions/{id}/screen", s.handleScreen)
 	m.HandleFunc("POST /api/v1/sessions/{id}/stop", s.handleStop)
 	m.HandleFunc("POST /api/v1/sessions/{id}/input", s.handleInput)
