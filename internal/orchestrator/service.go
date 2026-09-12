@@ -29,10 +29,14 @@ type Service struct {
 	mu            sync.RWMutex
 
 	activeSessions map[string]*AgentSession
-	completions    map[*completionSub]struct{}
-	hookBaseURL    string
-	onLaunch       func(sessionID, launchID string, decisions activity.DecisionCodec)
-	activityState  func(sessionID string) activity.State
+	// busy names the exclusive operation in flight on a ticket: a run being
+	// spawned, a merge, or a delete. Held under mu with activeSessions so a
+	// check-then-act on one never interleaves with the other.
+	busy          map[string]string
+	completions   map[*completionSub]struct{}
+	hookBaseURL   string
+	onLaunch      func(sessionID, launchID string, decisions activity.DecisionCodec)
+	activityState func(sessionID string) activity.State
 }
 
 // ErrInputSuppressed is returned by SendInput when typing into the pane would
@@ -61,8 +65,46 @@ func NewService(store Store, llm LLMClient, runner Runner, ctx ContextCarryProvi
 		ctx:            ctx,
 		logs:           make(map[string][]string),
 		activeSessions: make(map[string]*AgentSession),
+		busy:           make(map[string]string),
 		completions:    make(map[*completionSub]struct{}),
 	}
+}
+
+// ErrTicketBusy is returned when a ticket is in the middle of an operation
+// that must not overlap with the one requested.
+var ErrTicketBusy = errors.New("orchestrator: ticket busy")
+
+// reserve claims a ticket for what. With refuseActive it also refuses while an
+// agent session is live on the ticket. The check and the claim happen under
+// one lock, so a merge can never slip in between a run's active-session check
+// and its registration, or the other way round.
+func (s *Service) reserve(ticketID, what string, refuseActive bool) error {
+	if ticketID == "" {
+		return nil
+	}
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if current, taken := s.busy[ticketID]; taken {
+		return fmt.Errorf("%w: %s is %s", ErrTicketBusy, ticketID, current)
+	}
+	if refuseActive {
+		for _, sess := range s.activeSessions {
+			if sess.TicketID == ticketID {
+				return fmt.Errorf("orchestrator.%s: agent session active on %s", what, ticketID)
+			}
+		}
+	}
+	s.busy[ticketID] = what
+	return nil
+}
+
+func (s *Service) release(ticketID string) {
+	if ticketID == "" {
+		return
+	}
+	s.mu.Lock()
+	delete(s.busy, ticketID)
+	s.mu.Unlock()
 }
 
 // completionBuffer is how many unread completions a subscriber may fall
@@ -212,6 +254,11 @@ func (s *Service) prepareWorkDir(ctx context.Context, ticketID, sessionID string
 }
 
 func (s *Service) StartAdHocRun(ctx context.Context, ticketID, agent, prompt string) (store.Session, error) {
+	if err := s.reserve(ticketID, "starting", false); err != nil {
+		return store.Session{}, err
+	}
+	defer s.release(ticketID)
+
 	session, err := s.store.CreateSession(ctx, store.Session{
 		TicketID: ticketID,
 		Agent:    agent,
@@ -370,6 +417,10 @@ func (s *Service) StartApprovedRun(ctx context.Context, proposalID string) (stor
 	if s.store.HasActiveSession(ctx, proposal.TicketID) {
 		return store.Session{}, fmt.Errorf("orchestrator.startApprovedRun: active session exists")
 	}
+	if err := s.reserve(proposal.TicketID, "starting", false); err != nil {
+		return store.Session{}, err
+	}
+	defer s.release(proposal.TicketID)
 
 	session, err := s.store.CreateSession(ctx, store.Session{
 		TicketID: proposal.TicketID,
