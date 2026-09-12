@@ -75,7 +75,8 @@ type runStartFailedMsg struct {
 }
 
 type runCompletedMsg struct {
-	ticketID string
+	ticketID  string
+	sessionID string
 }
 
 type agentActiveChangedMsg struct{}
@@ -146,7 +147,7 @@ type Orchestrator interface {
 	GetActiveSessions() []*orchestrator.AgentSession
 	GetPaneContent(sessionID string, lines int) (string, error)
 	SwitchToPane(sessionID string) error
-	CompletionChan() <-chan orchestrator.RunCompletion
+	SubscribeCompletions() (<-chan orchestrator.RunCompletion, func())
 }
 
 type AppDeps struct {
@@ -193,6 +194,7 @@ type App struct {
 
 	generatingProposals map[string]bool
 	completionCh        <-chan orchestrator.RunCompletion
+	unsubscribe         func()
 }
 
 func NewApp(cfg *config.Config, s *store.Store, reg *theme.Registry, deps AppDeps) (*App, error) {
@@ -219,6 +221,7 @@ func NewApp(cfg *config.Config, s *store.Store, reg *theme.Registry, deps AppDep
 	}
 
 	agents := config.DetectAgents()
+	completions, unsubscribe := deps.Orchestrator.SubscribeCompletions()
 
 	a := &App{
 		store:               s,
@@ -234,7 +237,8 @@ func NewApp(cfg *config.Config, s *store.Store, reg *theme.Registry, deps AppDep
 		ticketView:          NewTicketViewModel(s, resolver, t, agents).SetGitContext(deps.CurrentBranch, cfg.Git.BranchPrefix),
 		dashboard:           NewDashboardModel(s, deps.Orchestrator, resolver, agents, t),
 		generatingProposals: make(map[string]bool),
-		completionCh:        deps.Orchestrator.CompletionChan(),
+		completionCh:        completions,
+		unsubscribe:         unsubscribe,
 	}
 
 	cr := NewCommandRegistry()
@@ -306,6 +310,30 @@ func (a *App) waitForActivityCmd() tea.Cmd {
 	}
 }
 
+// Close ends the app's subscriptions so their listeners unblock.
+func (a *App) Close() {
+	if a.unsubscribe != nil {
+		a.unsubscribe()
+	}
+}
+
+// waitForCompletionCmd blocks on the next run completion, whichever run it
+// belongs to, and re-arms itself from the runCompletedMsg handler. One
+// listener for the whole board: a per-run listener could take another run's
+// completion and report it under its own ticket.
+func (a *App) waitForCompletionCmd() tea.Cmd {
+	if a.completionCh == nil {
+		return nil
+	}
+	return func() tea.Msg {
+		completion, ok := <-a.completionCh
+		if !ok {
+			return nil
+		}
+		return runCompletedMsg{ticketID: completion.TicketID, sessionID: completion.SessionID}
+	}
+}
+
 func (a *App) Init() tea.Cmd {
 	// Always arm the animation tick at startup. The kanban only advances
 	// its animFrame when an agent is active, so idle ticks are cheap.
@@ -314,6 +342,9 @@ func (a *App) Init() tea.Cmd {
 		cmds = append(cmds, animationTick())
 	}
 	if c := a.waitForActivityCmd(); c != nil {
+		cmds = append(cmds, c)
+	}
+	if c := a.waitForCompletionCmd(); c != nil {
 		cmds = append(cmds, c)
 	}
 	return tea.Batch(cmds...)
@@ -420,7 +451,14 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				a.ticketView = a.ticketView.SetTicket(&updated)
 			}
 		}
-		return a, a.showNotification("Run completed", fmt.Sprintf("Agent finished working on %s", msg.ticketID), NotificationSuccess)
+		what := msg.ticketID
+		if what == "" {
+			what = "ad-hoc session " + msg.sessionID
+		}
+		return a, tea.Batch(
+			a.showNotification("Run completed", fmt.Sprintf("Agent finished working on %s", what), NotificationSuccess),
+			a.waitForCompletionCmd(),
+		)
 	case agentActiveChangedMsg:
 		// Emitted by the start*Cmd goroutines right after they call
 		// StartApprovedRun/StartAdHocRun, which sets AgentActive=true in the
@@ -550,70 +588,37 @@ func (a *App) approveProposalCmd(proposalID string) tea.Cmd {
 	}
 }
 
+// The start commands only start: completion arrives through the board's one
+// listener, so a run that finishes an hour later still reports under its own
+// ticket.
 func (a *App) startRunAndListenCmd(proposalID string) tea.Cmd {
-	// Two-part cmd: first synchronously start the run and emit an
-	// agentActiveChangedMsg so the kanban reloads + tick arms; then listen
-	// for completion in the background and emit runCompletedMsg when done.
-	return tea.Batch(
-		func() tea.Msg {
-			ctx := context.Background()
-			_, err := a.orchestrator.StartApprovedRun(ctx, proposalID)
-			if err != nil {
-				return runStartFailedMsg{err: err}
-			}
-			return agentActiveChangedMsg{}
-		},
-		func() tea.Msg {
-			select {
-			case completion := <-a.completionCh:
-				return runCompletedMsg{ticketID: completion.TicketID}
-			case <-time.After(60 * time.Second):
-				return runCompletedMsg{ticketID: ""}
-			}
-		},
-	)
+	return func() tea.Msg {
+		_, err := a.orchestrator.StartApprovedRun(context.Background(), proposalID)
+		if err != nil {
+			return runStartFailedMsg{err: err}
+		}
+		return agentActiveChangedMsg{}
+	}
 }
 
 func (a *App) startAdHocRunAndListenCmd(agent, prompt string) tea.Cmd {
-	return tea.Batch(
-		func() tea.Msg {
-			ctx := context.Background()
-			_, err := a.orchestrator.StartAdHocRun(ctx, "", agent, prompt)
-			if err != nil {
-				return runStartFailedMsg{err: err}
-			}
-			return agentActiveChangedMsg{}
-		},
-		func() tea.Msg {
-			select {
-			case completion := <-a.completionCh:
-				return runCompletedMsg{ticketID: completion.TicketID}
-			case <-time.After(60 * time.Second):
-				return runCompletedMsg{ticketID: ""}
-			}
-		},
-	)
+	return func() tea.Msg {
+		_, err := a.orchestrator.StartAdHocRun(context.Background(), "", agent, prompt)
+		if err != nil {
+			return runStartFailedMsg{err: err}
+		}
+		return agentActiveChangedMsg{}
+	}
 }
 
 func (a *App) startDirectRunAndListenCmd(ticketID, agent, prompt string) tea.Cmd {
-	return tea.Batch(
-		func() tea.Msg {
-			ctx := context.Background()
-			_, err := a.orchestrator.StartAdHocRun(ctx, ticketID, agent, prompt)
-			if err != nil {
-				return runStartFailedMsg{err: err}
-			}
-			return agentActiveChangedMsg{}
-		},
-		func() tea.Msg {
-			select {
-			case <-a.completionCh:
-				return runCompletedMsg{ticketID: ticketID}
-			case <-time.After(60 * time.Second):
-				return runCompletedMsg{ticketID: ""}
-			}
-		},
-	)
+	return func() tea.Msg {
+		_, err := a.orchestrator.StartAdHocRun(context.Background(), ticketID, agent, prompt)
+		if err != nil {
+			return runStartFailedMsg{err: err}
+		}
+		return agentActiveChangedMsg{}
+	}
 }
 
 func (a *App) handleStatusChanged(msg statusChangedMsg) (tea.Model, tea.Cmd) {
