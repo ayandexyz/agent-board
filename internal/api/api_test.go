@@ -468,20 +468,18 @@ func TestStartBindsLoopbackAndStreamsCompletions(t *testing.T) {
 		t.Fatalf("base = %q", base)
 	}
 
+	// Completions and alerts arrive on separate forwarders, so their order
+	// is only fixed when they are sent one at a time.
 	b.completions <- orchestrator.RunCompletion{TicketID: "AGT-01", SessionID: "SES-01", Outcome: "success"}
-	a.alerts <- activity.Alert{SessionID: "SES-01", State: activity.StateBlocked, Title: "Bash"}
-
-	events := readEvents(t, base+"/api/v1/events", 2)
+	events := readEvents(t, base+"/api/v1/events", 1)
 	if events[0].Type != "run.completed" || events[0].Seq != 1 {
 		t.Errorf("first event = %+v", events[0])
 	}
-	if events[1].Type != "activity.alert" || events[1].Seq != 2 {
-		t.Errorf("second event = %+v", events[1])
-	}
 
+	a.alerts <- activity.Alert{SessionID: "SES-01", State: activity.StateBlocked, Title: "Bash"}
 	replay := readEvents(t, base+"/api/v1/events?after=1", 1)
-	if replay[0].Seq != 2 {
-		t.Errorf("replay after=1 gave seq %d", replay[0].Seq)
+	if replay[0].Type != "activity.alert" || replay[0].Seq != 2 {
+		t.Errorf("replay after=1 gave %+v", replay[0])
 	}
 }
 
