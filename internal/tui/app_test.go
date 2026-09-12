@@ -32,6 +32,8 @@ type fakeOrchestrator struct {
 	lastMergeStrategy orchestrator.MergeStrategy
 	deleteErr         error
 	lastDeletedTicket string
+	lastInput         string
+	sendInputErr      error
 }
 
 func newFakeOrchestrator(s *store.Store) *fakeOrchestrator {
@@ -77,7 +79,8 @@ func (f *fakeOrchestrator) GetLogs(sessionID string) []string {
 }
 
 func (f *fakeOrchestrator) SendInput(sessionID, input string) error {
-	return nil
+	f.lastInput = sessionID + ":" + input
+	return f.sendInputErr
 }
 
 func (f *fakeOrchestrator) GetActiveSessions() []*orchestrator.AgentSession {

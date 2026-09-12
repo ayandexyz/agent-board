@@ -272,6 +272,10 @@ Deliberately not yet declared, because nothing reads them: `lifecycle.session_en
 
 `Receiver.Subscribe()` returns a stream of alerts and a cancel func. Every subscriber gets its own `eventBuffer`-deep channel and sees every alert raised after it subscribed, so the TUI, an API websocket and a push bridge never take alerts from one another — which a single shared channel did. Sends are non-blocking and drop on overflow: a missed toast costs a notification, a blocked hook stalls the agent. Cancel closes the stream (idempotent), and `Receiver.Close` ends every subscription so readers unblock.
 
+### Typing into a pane
+
+Every keystroke the board sends to an agent goes through `Service.SendInput`, which asks the receiver's `StateOf` immediately before writing (`SetActivityState`, wired in `run.go`) and refuses with `ErrInputSuppressed` while the session is `blocked` — Enter would answer the permission dialog — or `exited`, where the pane holds a bare shell. The dashboard shows the refusal as a notification. Text is typed with `sendKeysChunked`: `send-keys -l` in 16 KiB chunks, a 300 ms pause, then `Enter`; the launch prompt uses the same path with newlines replaced by spaces, since Enter submits in every agent's composer.
+
 Not built yet: the store migration, the tool-flight rule beyond "any PostToolUse clears the block", the TUI glyph/waiting overlay, and the capture-pane reconciler.
 
 Every agent pane is launched with its session identity exported via `tmux new-window -e`:

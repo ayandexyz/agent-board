@@ -189,6 +189,7 @@ func (f *fakeTmuxRunner) Start(_ context.Context, req orchestrator.RunRequest) (
 
 func (f *fakeTmuxRunner) GetPaneID(_ string) (string, bool) { return "", false }
 func (f *fakeTmuxRunner) Kill(_ string) error               { return nil }
+func (f *fakeTmuxRunner) SendInput(_, _ string) error       { return nil }
 
 type fakeAsyncTmuxRunner struct {
 	onComplete func(outcome, summary, resumeCommand string)
@@ -201,6 +202,7 @@ func (f *fakeAsyncTmuxRunner) Start(_ context.Context, req orchestrator.RunReque
 
 func (f *fakeAsyncTmuxRunner) GetPaneID(_ string) (string, bool) { return "", false }
 func (f *fakeAsyncTmuxRunner) Kill(_ string) error               { return nil }
+func (f *fakeAsyncTmuxRunner) SendInput(_, _ string) error       { return nil }
 
 type fakeCtx struct{}
 
@@ -220,3 +222,4 @@ func (c *capturingRunner) Start(_ context.Context, req orchestrator.RunRequest) 
 
 func (c *capturingRunner) GetPaneID(_ string) (string, bool) { return "", false }
 func (c *capturingRunner) Kill(_ string) error               { return nil }
+func (c *capturingRunner) SendInput(_, _ string) error       { return nil }

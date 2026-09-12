@@ -84,6 +84,7 @@ type AgentRunner interface {
 	Start(ctx context.Context, req RunRequest) (RunHandle, error)
 	GetPaneID(sessionID string) (string, bool)
 	Kill(sessionID string) error
+	SendInput(sessionID, text string) error
 }
 
 type Store interface {

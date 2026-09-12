@@ -309,13 +309,14 @@ esac
 		t.Fatalf("Start() error = %v", err)
 	}
 
-	// Wait until the trailing submit Enter has been written. Injecting
-	// "P0MX_DONE_SIGNAL\nline one\nline two" with 10ms per char takes ~320ms.
+	// The prompt goes in as one literal line, then a pause, then Enter.
 	log := waitForTmuxLog(t, logFile, func(log string) bool {
-		// The trailing Enter follows the last char of "two" ('o').
-		return strings.Contains(log, "send-keys -t %42 -l o\n") &&
+		return strings.Contains(log, "send-keys -t %42 -l line one line two\n") &&
 			strings.Contains(log, "send-keys -t %42 Enter\n")
 	})
+	if !strings.Contains(log, "send-keys -t %42 -l line one line two\n") {
+		t.Fatalf("Start() did not send the prompt as one literal line:\n%s", log)
+	}
 
 	if strings.Contains(log, "send-keys -t %42 -l C-m") {
 		t.Fatalf("Start() typed literal C-m characters instead of handling newlines:\n%s", log)
@@ -328,9 +329,6 @@ esac
 	enterCount := strings.Count(log, "send-keys -t %42 Enter\n")
 	if enterCount != 1 {
 		t.Fatalf("Start() sent %d bare Enter key presses (want 1, the prompt submit); in-prompt newlines must be replaced with spaces, not Enter (would submit prematurely):\n%s", enterCount, log)
-	}
-	if !strings.Contains(log, "send-keys -t %42 -l  ") {
-		t.Fatalf("Start() did not send a literal space for newlines (prompt should be single-line):\n%s", log)
 	}
 }
 
@@ -706,4 +704,100 @@ esac
 	if err := runner.Kill("SES-03"); err != nil {
 		t.Fatalf("Kill on a forgotten session = %v, want nil", err)
 	}
+}
+
+func TestSendKeysChunked(t *testing.T) {
+	tmuxDir := t.TempDir()
+	logFile := filepath.Join(tmuxDir, "tmux.log")
+	t.Setenv("FAKE_TMUX_LOG", logFile)
+	t.Setenv("PATH", tmuxDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	fakeTmux := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$FAKE_TMUX_LOG\"\n"
+	if err := os.WriteFile(filepath.Join(tmuxDir, "tmux"), []byte(fakeTmux), 0755); err != nil {
+		t.Fatal(err)
+	}
+
+	text := strings.Repeat("a", sendChunk) + strings.Repeat("b", sendChunk) + "tail"
+	if err := sendKeysChunked(context.Background(), "%9", text); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(logFile)
+	lines := strings.Split(strings.TrimSpace(string(raw)), "\n")
+	want := []string{
+		"send-keys -t %9 -l " + strings.Repeat("a", sendChunk),
+		"send-keys -t %9 -l " + strings.Repeat("b", sendChunk),
+		"send-keys -t %9 -l tail",
+		"send-keys -t %9 Enter",
+	}
+	if len(lines) != len(want) {
+		t.Fatalf("got %d tmux calls, want %d:\n%s", len(lines), len(want), shortenLines(lines))
+	}
+	for i := range want {
+		if lines[i] != want[i] {
+			t.Fatalf("call %d = %q, want %q", i, shorten(lines[i]), shorten(want[i]))
+		}
+	}
+}
+
+func TestSendKeysChunkedStopsWhenCancelled(t *testing.T) {
+	tmuxDir := t.TempDir()
+	logFile := filepath.Join(tmuxDir, "tmux.log")
+	t.Setenv("FAKE_TMUX_LOG", logFile)
+	t.Setenv("PATH", tmuxDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	fakeTmux := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$FAKE_TMUX_LOG\"\n"
+	if err := os.WriteFile(filepath.Join(tmuxDir, "tmux"), []byte(fakeTmux), 0755); err != nil {
+		t.Fatal(err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	if err := sendKeysChunked(ctx, "%9", "hello"); err == nil {
+		t.Fatal("expected an error from a cancelled context")
+	}
+	if raw, _ := os.ReadFile(logFile); strings.Contains(string(raw), "Enter") {
+		t.Fatalf("Enter was sent after cancellation:\n%s", raw)
+	}
+}
+
+func TestTmuxAgentRunnerSendInputTypesIntoPane(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-test,123,0")
+	t.Setenv("HOME", t.TempDir())
+	tmuxDir := t.TempDir()
+	logFile := filepath.Join(tmuxDir, "tmux.log")
+	t.Setenv("FAKE_TMUX_LOG", logFile)
+	t.Setenv("PATH", tmuxDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+	fakeTmux := "#!/bin/sh\nprintf '%s\\n' \"$*\" >> \"$FAKE_TMUX_LOG\"\ncase \"$1\" in new-window) printf '%%42\\n';; list-panes) exit 1;; esac\n"
+	if err := os.WriteFile(filepath.Join(tmuxDir, "tmux"), []byte(fakeTmux), 0755); err != nil {
+		t.Fatal(err)
+	}
+	runner, _ := NewTmuxAgentRunner("agentboard")
+	handle, err := runner.Start(testCtx(t), RunRequest{SessionID: "SES-05", Agent: "opencode", Prompt: "x"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer handle.Stop()
+
+	if err := runner.SendInput("SES-05", "yes please"); err != nil {
+		t.Fatal(err)
+	}
+	raw, _ := os.ReadFile(logFile)
+	if !strings.Contains(string(raw), "send-keys -t %42 -l yes please\n") {
+		t.Fatalf("input not typed into the session's pane:\n%s", raw)
+	}
+	if err := runner.SendInput("SES-99", "x"); err == nil {
+		t.Fatal("SendInput to an unknown session should fail")
+	}
+}
+
+func shorten(s string) string {
+	if len(s) > 60 {
+		return s[:60] + "…"
+	}
+	return s
+}
+
+func shortenLines(lines []string) string {
+	out := make([]string, len(lines))
+	for i, l := range lines {
+		out[i] = shorten(l)
+	}
+	return strings.Join(out, "\n")
 }
