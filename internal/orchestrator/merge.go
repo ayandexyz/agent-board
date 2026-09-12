@@ -68,9 +68,10 @@ func (s *Service) MergeTicket(ctx context.Context, ticketID string, strategy Mer
 	if s.merger == nil {
 		return MergeResult{}, fmt.Errorf("orchestrator.mergeTicket: git integration not configured")
 	}
-	if _, active := s.GetActiveSessionByTicket(ticketID); active {
-		return MergeResult{}, fmt.Errorf("orchestrator.mergeTicket: agent session active on %s", ticketID)
+	if err := s.reserve(ticketID, "merging", true); err != nil {
+		return MergeResult{}, err
 	}
+	defer s.release(ticketID)
 	if s.store.HasActiveSession(ctx, ticketID) {
 		return MergeResult{}, fmt.Errorf("orchestrator.mergeTicket: agent session active on %s", ticketID)
 	}
@@ -142,18 +143,22 @@ func (s *Service) MergeTicket(ctx context.Context, ticketID string, strategy Mer
 	}
 }
 
+// finalizeMerge cleans up first and moves the ticket only once the worktree
+// is gone. A cleanup that fails leaves the ticket in review with its path
+// intact, so the next merge attempt retries the cleanup instead of the
+// worktree being orphaned behind a done ticket.
 func (s *Service) finalizeMerge(ctx context.Context, ticket store.Ticket, forceBranch bool) error {
-	if err := s.store.MoveStatus(ctx, ticket.ID, "done"); err != nil {
-		return err
-	}
 	if err := s.merger.Cleanup(ctx, ticket, forceBranch); err != nil {
 		_, _ = s.store.CreateEvent(ctx, store.Event{
 			TicketID: ticket.ID,
 			Kind:     "merge.cleanup_failed",
 			Payload:  err.Error(),
 		})
-	} else {
-		_ = s.store.SetWorktreePath(ctx, ticket.ID, "")
+		return fmt.Errorf("orchestrator.finalizeMerge: merged, but worktree cleanup failed and %s stays in review (merge again to retry): %w", ticket.ID, err)
+	}
+	_ = s.store.SetWorktreePath(ctx, ticket.ID, "")
+	if err := s.store.MoveStatus(ctx, ticket.ID, "done"); err != nil {
+		return err
 	}
 	_, _ = s.store.CreateEvent(ctx, store.Event{
 		TicketID: ticket.ID,
@@ -175,6 +180,10 @@ func (s *Service) MoveTicketStatus(ctx context.Context, ticketID, newStatus stri
 			if ticket.PRURL != "" {
 				info, err := s.merger.PRState(ctx, ticket)
 				if err == nil && info.State == "MERGED" {
+					if err := s.reserve(ticketID, "merging", true); err != nil {
+						return err
+					}
+					defer s.release(ticketID)
 					return s.finalizeMerge(ctx, ticket, true)
 				}
 				return &MergeRequiredError{
@@ -208,9 +217,10 @@ func (s *Service) DeleteTicket(ctx context.Context, ticketID string) error {
 	if err != nil {
 		return err
 	}
-	if _, active := s.GetActiveSessionByTicket(ticketID); active {
-		return fmt.Errorf("orchestrator.deleteTicket: agent session active on %s", ticketID)
+	if err := s.reserve(ticketID, "deleting", true); err != nil {
+		return err
 	}
+	defer s.release(ticketID)
 	if ticket.WorktreePath != "" && s.worktrees != nil {
 		if err := s.worktrees.Remove(ctx, ticket.WorktreePath, false); err != nil {
 			return fmt.Errorf("orchestrator.deleteTicket: %w", err)

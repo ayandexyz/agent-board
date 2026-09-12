@@ -57,6 +57,8 @@ Fix: replace the shared channel with the event hub from the tracking design, or 
 Fix: `send-keys -l` in 16 KB chunks, 300 ms pause, then `Enter`. Report failure through `onComplete`.
 
 ### 8. Merge races an active agent
+**Fixed** on `fix/merge-safety`: `Service.reserve` claims the ticket under `s.mu` together with the active-session check; runs refuse to start while a merge or delete holds it (`ErrTicketBusy`), and merges, PR-finalize and delete refuse while a run is starting or active.
+
 `internal/orchestrator/merge.go:71-76`. Active-session check, then rebase and merge with no lock held. A run started in between rebases a worktree the agent is writing to.
 
 Fix: hold `s.mu` across the check and mark the ticket merging; `StartAdHocRun` refuses while merging.
@@ -72,6 +74,8 @@ Fix: hold `s.mu` across the check and mark the ticket merging; `StartAdHocRun` r
 `internal/orchestrator/pty_runner.go:210-212`. `GetPaneID` is a stub returning empty though the pane id is known at line 46. Fixing bug 3 fixes this.
 
 ### 11. Done ticket keeps a stale worktree
+**Fixed**: `finalizeMerge` cleans up first and only then moves the ticket to done; a failed cleanup keeps the ticket in review with its path intact and the next merge retries it.
+
 `internal/orchestrator/merge.go:145-163`. `MoveStatus(done)` commits before `Cleanup`; on cleanup failure only an event is logged and `SetWorktreePath("")` is skipped. Nothing ever reclaims it.
 
 ### 12. SQLite without busy_timeout or WAL

@@ -3,6 +3,7 @@ package orchestrator_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/ayan-de/agent-board/internal/git"
@@ -13,12 +14,15 @@ import (
 type fakeGitOps struct {
 	fakeWorktrees
 
-	localResult orchestrator.MergeResult
-	localErr    error
-	prResult    orchestrator.MergeResult
-	prErr       error
-	prState     git.PRInfo
-	prStateErr  error
+	localResult  orchestrator.MergeResult
+	localErr     error
+	localBlock   chan struct{}
+	localStarted chan struct{}
+	cleanupErr   error
+	prResult     orchestrator.MergeResult
+	prErr        error
+	prState      git.PRInfo
+	prStateErr   error
 
 	localCalled   bool
 	prCalled      bool
@@ -30,6 +34,12 @@ type fakeGitOps struct {
 
 func (f *fakeGitOps) MergeLocal(_ context.Context, t store.Ticket) (orchestrator.MergeResult, error) {
 	f.localCalled = true
+	if f.localStarted != nil {
+		close(f.localStarted)
+	}
+	if f.localBlock != nil {
+		<-f.localBlock
+	}
 	return f.localResult, f.localErr
 }
 
@@ -47,7 +57,7 @@ func (f *fakeGitOps) PRState(_ context.Context, t store.Ticket) (git.PRInfo, err
 func (f *fakeGitOps) Cleanup(_ context.Context, t store.Ticket, forceBranch bool) error {
 	f.cleanupCalled = true
 	f.cleanupForce = forceBranch
-	return nil
+	return f.cleanupErr
 }
 
 func newMergeService(fs *fakeStore, ops *fakeGitOps) *orchestrator.Service {
@@ -313,5 +323,153 @@ func TestDeleteTicketWithoutWorktree(t *testing.T) {
 	}
 	if fs.deletedTicketID != "AGT-01" {
 		t.Errorf("deleted ticket = %q, want AGT-01", fs.deletedTicketID)
+	}
+}
+
+// blockingRunner holds Start open until released, so a test can observe what
+// the service refuses while a run is still being spawned.
+type blockingRunner struct {
+	started chan struct{}
+	release chan struct{}
+}
+
+func (b *blockingRunner) Start(_ context.Context, _ orchestrator.RunRequest) (orchestrator.RunHandle, error) {
+	close(b.started)
+	<-b.release
+	return orchestrator.RunHandle{Outcome: "running"}, nil
+}
+func (b *blockingRunner) GetPaneID(string) (string, bool) { return "", false }
+func (b *blockingRunner) Kill(string) error               { return nil }
+func (b *blockingRunner) SendInput(_, _ string) error     { return nil }
+
+func TestStartRunRefusedWhileMerging(t *testing.T) {
+	fs := &fakeStore{
+		ticket:   store.Ticket{ID: "AGT-01", Status: "review", WorktreePath: "/wt/AGT-01", Branch: "agent/agt-01"},
+		proposal: store.Proposal{ID: "PRP-01", TicketID: "AGT-01", Agent: "opencode", Status: "approved", Prompt: "x"},
+	}
+	ops := &fakeGitOps{
+		localResult:  orchestrator.MergeResult{Outcome: orchestrator.MergeOutcomeMerged},
+		localBlock:   make(chan struct{}),
+		localStarted: make(chan struct{}),
+	}
+	svc := newMergeService(fs, ops)
+	svc.SetAgentRunner(&capturingRunner{})
+
+	merged := make(chan error, 1)
+	go func() {
+		_, err := svc.MergeTicket(context.Background(), "AGT-01", "")
+		merged <- err
+	}()
+	<-ops.localStarted
+
+	if _, err := svc.StartAdHocRun(context.Background(), "AGT-01", "opencode", "x"); !errors.Is(err, orchestrator.ErrTicketBusy) {
+		t.Fatalf("StartAdHocRun during merge: err = %v, want ErrTicketBusy", err)
+	}
+	if _, err := svc.StartApprovedRun(context.Background(), "PRP-01"); !errors.Is(err, orchestrator.ErrTicketBusy) {
+		t.Fatalf("StartApprovedRun during merge: err = %v, want ErrTicketBusy", err)
+	}
+	if err := svc.DeleteTicket(context.Background(), "AGT-01"); !errors.Is(err, orchestrator.ErrTicketBusy) {
+		t.Fatalf("DeleteTicket during merge: err = %v, want ErrTicketBusy", err)
+	}
+	if fs.lastAgentActive {
+		t.Fatal("a refused start left the ticket agent_active")
+	}
+
+	close(ops.localBlock)
+	if err := <-merged; err != nil {
+		t.Fatalf("merge: %v", err)
+	}
+	if _, err := svc.StartAdHocRun(context.Background(), "AGT-01", "opencode", "x"); err != nil {
+		t.Fatalf("start after merge finished: %v", err)
+	}
+}
+
+func TestMergeRefusedWhileRunStarting(t *testing.T) {
+	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01", Status: "review", WorktreePath: "/wt/AGT-01"}}
+	ops := &fakeGitOps{localResult: orchestrator.MergeResult{Outcome: orchestrator.MergeOutcomeMerged}}
+	svc := newMergeService(fs, ops)
+	runner := &blockingRunner{started: make(chan struct{}), release: make(chan struct{})}
+	svc.SetAgentRunner(runner)
+
+	go func() { _, _ = svc.StartAdHocRun(context.Background(), "AGT-01", "opencode", "x") }()
+	<-runner.started
+
+	_, err := svc.MergeTicket(context.Background(), "AGT-01", "")
+	if err == nil {
+		t.Fatal("merge went ahead while a run was being spawned on the ticket")
+	}
+	if ops.localCalled {
+		t.Fatal("MergeLocal ran against a worktree an agent was about to use")
+	}
+	close(runner.release)
+}
+
+func TestMoveToDoneWithMergedPRRefusesActiveSession(t *testing.T) {
+	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01", Status: "review", WorktreePath: "/wt/AGT-01", PRURL: "https://pr/7"}}
+	ops := &fakeGitOps{prState: git.PRInfo{State: "MERGED", URL: "https://pr/7"}}
+	svc := newMergeService(fs, ops)
+	svc.SetAgentRunner(&capturingRunner{})
+	if _, err := svc.StartAdHocRun(context.Background(), "AGT-01", "opencode", "x"); err != nil {
+		t.Fatal(err)
+	}
+
+	err := svc.MoveTicketStatus(context.Background(), "AGT-01", "done")
+	if err == nil {
+		t.Fatal("moved to done and cleaned up the worktree under a running agent")
+	}
+	if ops.cleanupCalled {
+		t.Fatal("Cleanup ran while an agent session was active")
+	}
+}
+
+func TestCleanupFailureKeepsTicketInReview(t *testing.T) {
+	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01", Status: "review", WorktreePath: "/wt/AGT-01", Branch: "agent/agt-01"}}
+	ops := &fakeGitOps{
+		localResult: orchestrator.MergeResult{Outcome: orchestrator.MergeOutcomeMerged},
+		cleanupErr:  errors.New("worktree has untracked files"),
+	}
+	svc := newMergeService(fs, ops)
+
+	res, err := svc.MergeTicket(context.Background(), "AGT-01", "")
+	if err == nil {
+		t.Fatal("cleanup failure was swallowed")
+	}
+	if !strings.Contains(err.Error(), "untracked") {
+		t.Fatalf("error hides the cause: %v", err)
+	}
+	if res.Outcome != orchestrator.MergeOutcomeMerged {
+		t.Fatalf("Outcome = %q; the merge itself did succeed", res.Outcome)
+	}
+	if fs.lastMoveStatus == "done" {
+		t.Fatal("ticket moved to done with its worktree still on disk")
+	}
+	if fs.lastWorktreePath != "" || fs.ticket.WorktreePath != "/wt/AGT-01" {
+		t.Fatalf("worktree path was cleared without a cleanup: %q", fs.lastWorktreePath)
+	}
+	if !fs.hasEventKind("merge.cleanup_failed") {
+		t.Fatalf("no merge.cleanup_failed event: %v", fs.events)
+	}
+
+	// The user fixes the worktree and merges again: the second pass cleans
+	// up and finishes.
+	ops.cleanupErr = nil
+	if _, err := svc.MergeTicket(context.Background(), "AGT-01", ""); err != nil {
+		t.Fatalf("retry: %v", err)
+	}
+	if fs.lastMoveStatus != "done" {
+		t.Fatalf("retry left status %q", fs.lastMoveStatus)
+	}
+}
+
+func TestMoveToDoneWithMergedPRCleanupFailureKeepsReview(t *testing.T) {
+	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01", Status: "review", WorktreePath: "/wt/AGT-01", PRURL: "https://pr/7"}}
+	ops := &fakeGitOps{prState: git.PRInfo{State: "MERGED"}, cleanupErr: errors.New("busy")}
+	svc := newMergeService(fs, ops)
+
+	if err := svc.MoveTicketStatus(context.Background(), "AGT-01", "done"); err == nil {
+		t.Fatal("cleanup failure was swallowed on the PR path")
+	}
+	if fs.lastMoveStatus == "done" {
+		t.Fatal("ticket moved to done with its worktree still on disk")
 	}
 }

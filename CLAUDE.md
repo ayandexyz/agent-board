@@ -409,7 +409,7 @@ Backlog -> In Progress            -> Review              -> Done
 - **Strategies** (`[git] merge_strategy`, default `local`):
   - `local`: rebase the ticket branch onto the base branch *inside the worktree*, then `git merge --ff-only` in the repo root (root must be clean and on the base branch). Conflicts abort the rebase, emit a `merge.conflict` event, and leave the ticket in review.
   - `pr`: push the branch and `gh pr create`; PR URL stored in `tickets.pr_url`. Moving to done requires the PR to report MERGED (`gh pr view --json state`), then cleanup runs with a forced branch delete (squash-safe).
-- **Guardrails**: merges refuse while an agent session is active; dirty worktrees are never auto-removed (ticket delete also refuses); no git repo -> all of this degrades to the old behavior.
+- **Guardrails**: merges, PR-finalize and delete refuse while an agent session is active or still being spawned, and a run refuses to start (`ErrTicketBusy`) while a merge or delete holds the ticket — `Service.reserve` takes the claim under the same lock as the active-session check, so neither can slip in between the other's check and act. Cleanup runs before the ticket moves to done: if the worktree cannot be removed the ticket stays in review with its path intact and merging again retries. Dirty worktrees are never auto-removed (ticket delete also refuses); no git repo -> all of this degrades to the old behavior.
 
 ### Key packages
 
