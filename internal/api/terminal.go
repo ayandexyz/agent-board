@@ -46,13 +46,13 @@ func (s *Server) handleTerminal(w http.ResponseWriter, r *http.Request) {
 
 func (s *Server) handleSessionTerminal(w http.ResponseWriter, r *http.Request) {
 	id := r.PathValue("id")
-	var windowID string
-	for _, as := range s.Board.GetActiveSessions() {
-		if as.SessionID == id {
-			windowID = as.WindowID
-			break
-		}
-	}
+	// AgentSession.WindowID is never set at construction (see
+	// orchestrator.Service.startRun/startAdHocRun) - it reads as "" for
+	// every session, which made this 404 unconditionally. WindowForSession
+	// is the same resolver handleListSessions already uses to answer the
+	// "window" field, and it works because it derives the name instead of
+	// reading the dead field.
+	windowID := s.Board.WindowForSession(id)
 	if windowID == "" {
 		writeError(w, http.StatusNotFound, "no active session with that id")
 		return
@@ -70,6 +70,19 @@ func (s *Server) serveTerminal(w http.ResponseWriter, r *http.Request, windowID 
 	if err != nil {
 		writeErr(w, err)
 		return
+	}
+	// AIChat's WebView loads the terminal page with baseUrl "about:blank" -
+	// an opaque origin, so its WebSocket sends the literal header
+	// "Origin: null". coder/websocket's origin check parses that to an
+	// empty host and rejects it with 403 (verified directly: a live
+	// session, over the same tailnet path the phone uses, 403'd with
+	// "Origin: null" set and succeeded with no Origin header at all).
+	// OriginPatterns can't allowlist this either - matching still requires
+	// a non-empty parsed host. Dropping a literal "null" down to "no
+	// header" hits the check's own explicit pass-through for an absent
+	// Origin, without weakening it for any other (real, mismatched) value.
+	if r.Header.Get("Origin") == "null" {
+		r.Header.Del("Origin")
 	}
 	conn, err := websocket.Accept(w, r, nil)
 	if err != nil {
