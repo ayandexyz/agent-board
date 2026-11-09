@@ -145,44 +145,130 @@ agentboard
 
 ## Configuration
 
-Configuration is loaded from `~/.agentboard/config.toml` (global) or `<project>/.agentboard/config.toml` (project-level).
+AgentBoard reads two TOML files, later ones overriding earlier ones, then environment variables on top:
 
-### Example Configuration
+1. `~/.agentboard/config.toml` (global, every project)
+2. `~/.agentboard/projects/<project>/config.toml` (one project; `<project>` is the repo's folder name)
+3. `AGENTBOARD_*` environment variables
+
+Both files are created with commented defaults on first run. Settings that differ per repository, such as `[git] setup_script`, belong in the project file.
+
+### Example
 
 ```toml
 [general]
 log = "info"
-tmux = true
+addr = "127.0.0.1:7878"
 
-[db]
-path = ".agentboard/agentboard.db"
+[board]
+prefix = "APP-"
 
 [llm]
 provider = "openai"
-model = "gpt-4"
-api_key = "${OPENAI_API_KEY}"
+model = "gpt-4o-mini"
+api_key = "sk-..."
 
-[llm.coordinator]
-model = "gpt-4"
-
-[llm.summarizer]
-model = "gpt-4"
+[git]
+merge_strategy = "local"
+copy_files = [".env", ".env.local"]
+setup_script = "npm install"
 
 [tui]
 theme = "nord"
-
-[mcp.contextcarry]
-command = "npx"
-args = ["-y", "@thisisayande/contextcarry-mcp"]
 ```
 
-### Environment Variables
+### All settings
 
-Override config values:
+#### `[general]`
 
-| Variable | Config Key |
+| Key | Default | What it does |
+|-----|---------|--------------|
+| `log` | `"info"` | Log level: `debug`, `info`, `warn`, `error` |
+| `api` | `true` | Start the local HTTP API alongside the TUI |
+| `addr` | `"127.0.0.1:7878"` | Address the HTTP API listens on. Must be loopback; reach it remotely with `ssh -L` or `tailscale serve` |
+| `mode` | `"tui"` | Startup mode. Only `tui` is implemented |
+| `tmux` | `"auto"` | `auto`, `always`, `never` (reserved; agents currently always run in tmux) |
+
+#### `[board]`
+
+| Key | Default | What it does |
+|-----|---------|--------------|
+| `prefix` | first 3 letters of the project | Ticket ID prefix, e.g. `"APP-"` gives `APP-01` |
+| `columns` | Backlog, In Progress, Review, Done | Ordered list of `{ status = "...", name = "..." }`. New tickets land in the first column |
+
+#### `[agent]`
+
+| Key | Default | What it does |
+|-----|---------|--------------|
+| `default` | `"opencode"` | Agent preselected when starting a ticket |
+
+#### `[llm]`: ticket decomposition and summaries
+
+| Key | Default | What it does |
+|-----|---------|--------------|
+| `provider` | — | `openai`, `claude`, `ollama`, `zai`, `minimax` |
+| `model` | — | Model name for the provider |
+| `api_key` | — | API key for the provider |
+| `base_url` | — | Custom endpoint (Ollama, proxies, compatible APIs) |
+| `coordinator_model` | `model` | Model used to plan and assign tickets |
+| `summarizer_model` | `model` | Model used to summarise finished runs |
+| `require_approval` | `true` | Ask before starting a run the coordinator proposed |
+
+#### `[git]`: worktrees and merging
+
+Every ticket in worktree mode gets its own git worktree and branch, so agents working in parallel never touch each other's files.
+
+| Key | Default | What it does |
+|-----|---------|--------------|
+| `merge_strategy` | `"local"` | `local`: rebase the ticket branch and fast-forward the base branch. `pr`: push and open a PR with `gh` |
+| `worktree_root` | `~/.agentboard/worktrees/<project>` | Where ticket worktrees are created |
+| `branch_prefix` | `"agent/"` | Prefix for generated branch names, e.g. `agent/app-07` |
+| `base_branch` | auto (`main`/`master`) | Branch worktrees start from and merge back into |
+| `copy_files` | — | Files or globs, relative to the repo root, copied into each **new** worktree. Use it for gitignored files the agent needs, like `.env`. Missing files are skipped; paths outside the repo are refused |
+| `setup_script` | — | Shell command run inside each **new** worktree after `copy_files` and before the agent starts, e.g. `npm install`, `go mod download`. If it fails, the worktree is removed and the ticket does not start; starting again retries from scratch. Time limit: 10 minutes |
+
+Why `copy_files` and `setup_script` matter: git only puts tracked files in a worktree, so a fresh one has no `node_modules` and no `.env`. Without them, the agent's first `npm test` fails and it spends its turn installing or guessing at missing secrets. With
+
+```toml
+[git]
+copy_files = [".env"]
+setup_script = "npm install"
+```
+
+starting a ticket creates the worktree, copies `.env`, runs `npm install`, and only then starts the agent. A worktree that already exists (restarting an agent on the same ticket) is reused as-is.
+
+#### `[tui]`
+
+| Key | Default | What it does |
+|-----|---------|--------------|
+| `theme` | `"default"` | Color theme; see [Themes](#themes) |
+| `layout` | `"compact"` | Board layout (reserved) |
+| `[tui.keybindings]` | — | Remap keys, e.g. `start_agent = "s"`. The generated config lists every action name |
+
+#### `[db]`
+
+| Key | Default | What it does |
+|-----|---------|--------------|
+| `path` | `~/.agentboard/projects/<project>/board.db` | SQLite database for tickets and sessions |
+
+#### `[mcp]`
+
+| Key | Default | What it does |
+|-----|---------|--------------|
+| `npm_path` | `"npm"` | npm binary used to launch MCP servers |
+| `node_path` | `"node"` | node binary used to launch MCP servers |
+| `[mcp.<name>]` | `contextcarry` enabled | One table per MCP server: `enabled`, `command`, `args` |
+
+### Environment variables
+
+Each overrides the config key next to it.
+
+| Variable | Config key |
 |----------|------------|
 | `AGENTBOARD_LOG` | `general.log` |
+| `AGENTBOARD_API` | `general.api` (`off`, `false` or `0` disables) |
+| `AGENTBOARD_ADDR` | `general.addr` |
+| `AGENTBOARD_MODE` | `general.mode` |
 | `AGENTBOARD_TMUX` | `general.tmux` |
 | `AGENTBOARD_DB` | `db.path` |
 | `AGENTBOARD_LLM_PROVIDER` | `llm.provider` |
@@ -191,6 +277,10 @@ Override config values:
 | `AGENTBOARD_LLM_BASE_URL` | `llm.base_url` |
 | `AGENTBOARD_LLM_COORDINATOR_MODEL` | `llm.coordinator_model` |
 | `AGENTBOARD_LLM_SUMMARIZER_MODEL` | `llm.summarizer_model` |
+| `AGENTBOARD_GIT_MERGE_STRATEGY` | `git.merge_strategy` |
+| `AGENTBOARD_GIT_WORKTREE_ROOT` | `git.worktree_root` |
+| `AGENTBOARD_GIT_BRANCH_PREFIX` | `git.branch_prefix` |
+| `AGENTBOARD_GIT_BASE_BRANCH` | `git.base_branch` |
 | `AGENTBOARD_NPM_PATH` | `mcp.npm_path` |
 | `AGENTBOARD_NODE_PATH` | `mcp.node_path` |
 

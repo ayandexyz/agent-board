@@ -514,6 +514,10 @@ Backlog -> In Progress            -> Review              -> Done
 | `worktree_root` | `~/.agentboard/worktrees/<project>` | Where ticket worktrees live |
 | `branch_prefix` | `agent/` | Branch name prefix when ticket has no branch |
 | `base_branch` | auto-detect `main`/`master` | Merge target |
+| `setup_script` | — | Shell command run with `sh -c` inside each **new** worktree before the agent starts (10 min limit). On failure the worktree is removed and the start is refused, so a retry sets up again |
+| `copy_files` | — | Paths or globs relative to the repo root (e.g. `.env`, `config/*.local.json`) copied into each new worktree before `setup_script`; missing matches are skipped, paths outside the repo are refused |
+
+Put these in the per-project config, `~/.agentboard/projects/<project>/config.toml`, since they differ per repository.
 
 ---
 
