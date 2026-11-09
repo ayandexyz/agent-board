@@ -9,8 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 
-	"github.com/ayan-de/agent-board/internal/git"
-	"github.com/ayan-de/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/git"
+	"github.com/ayandexyz/agent-board/internal/store"
 )
 
 const maxInlineUntracked = 256 << 10

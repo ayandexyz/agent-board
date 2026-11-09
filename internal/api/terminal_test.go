@@ -81,7 +81,7 @@ func TestSessionTerminalStreamsBothWaysAndResizes(t *testing.T) {
 	}
 	defer conn.CloseNow()
 
-	if opener.lastWindow != "@7" || opener.lastSize != [2]int{120, 40} {
+	if opener.lastWindow != "agent-SES-01" || opener.lastSize != [2]int{120, 40} {
 		t.Errorf("opened window %q size %v", opener.lastWindow, opener.lastSize)
 	}
 

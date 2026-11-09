@@ -5,9 +5,9 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/ayan-de/agent-board/internal/git"
-	"github.com/ayan-de/agent-board/internal/orchestrator"
-	"github.com/ayan-de/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/git"
+	"github.com/ayandexyz/agent-board/internal/orchestrator"
+	"github.com/ayandexyz/agent-board/internal/store"
 )
 
 type diffingWorktrees struct {

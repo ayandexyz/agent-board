@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ayan-de/agent-board/internal/git"
+	"github.com/ayandexyz/agent-board/internal/git"
 )
 
 const setupTimeout = 10 * time.Minute

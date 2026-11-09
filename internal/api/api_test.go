@@ -126,11 +126,19 @@ func (f *fakeBoard) StartAdHocRun(_ context.Context, ticketID, agent, prompt str
 		return store.Session{}, f.startErr
 	}
 	f.lastStart = [3]string{ticketID, agent, prompt}
+	f.sessions = append(f.sessions, &orchestrator.AgentSession{SessionID: "SES-01", TicketID: ticketID})
 	return store.Session{ID: "SES-01", TicketID: ticketID, Agent: agent, Status: "running", StartedAt: time.Now()}, nil
 }
 func (f *fakeBoard) StopSession(_ context.Context, id string) error  { f.lastStopped = id; return nil }
 func (f *fakeBoard) GetActiveSessions() []*orchestrator.AgentSession { return f.sessions }
-func (f *fakeBoard) WindowForSession(id string) string               { return "agent-" + id }
+func (f *fakeBoard) WindowForSession(id string) string {
+	for _, s := range f.sessions {
+		if s.SessionID == id {
+			return "agent-" + id
+		}
+	}
+	return ""
+}
 func (f *fakeBoard) SendInput(id, in string) error {
 	if f.inputErr != nil {
 		return f.inputErr

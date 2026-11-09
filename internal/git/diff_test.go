@@ -5,7 +5,7 @@ import (
 	"reflect"
 	"testing"
 
-	"github.com/ayan-de/agent-board/internal/git"
+	"github.com/ayandexyz/agent-board/internal/git"
 )
 
 func TestMergeBase(t *testing.T) {

@@ -5,10 +5,10 @@ import (
 	"encoding/json"
 	"testing"
 
-	"github.com/ayan-de/agent-board/internal/apitypes"
-	"github.com/ayan-de/agent-board/internal/git"
-	"github.com/ayan-de/agent-board/internal/orchestrator"
-	"github.com/ayan-de/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/apitypes"
+	"github.com/ayandexyz/agent-board/internal/git"
+	"github.com/ayandexyz/agent-board/internal/orchestrator"
+	"github.com/ayandexyz/agent-board/internal/store"
 )
 
 func (f *fakeBoard) TicketDiff(_ context.Context, id string) (orchestrator.TicketDiff, error) {
