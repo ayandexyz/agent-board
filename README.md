@@ -67,14 +67,14 @@ Ensure [Go](https://go.dev/doc/install) 1.21+ is installed.
 ```bash
 git clone https://github.com/ayan-de/agent-board.git
 cd agent-board
-go build -o agentboard ./cmd/agentboard
+make run        # builds ./agentboard and starts it
 
-# Add to PATH (optional)
-export PATH="$HOME/.local/bin:$PATH"
-
-# Run it in the project you want to use it in
-./agentboard
+# Or put it on your PATH (go install) and run it from any project
+make install
+agentboard
 ```
+
+`make` on its own lists every target.
 
 #### Platform-Specific Notes
 
@@ -249,14 +249,12 @@ agent-board/
 ### Commands
 
 ```bash
-# Build
-go build -o agentboard ./cmd/agentboard
-
-# Run tests
-go test ./...
-
-# Run vet
-go vet ./...
+make run               # build and start
+make build             # build ./agentboard
+make install           # go install onto your PATH
+make test              # unit tests
+make test-integration  # integration tests against real git
+make check             # vet + test, before a PR
 ```
 
 ### Debug Mode
@@ -268,7 +266,7 @@ AGENTBOARD_LOG=debug ./agentboard
 3.  **Running Tests**:
     We follow a strict TDD discipline. Ensure all tests pass before submitting changes.
     ```bash
-    go test ./...
+    make check
     ```
 
 4.  **Database Migrations**:
@@ -314,7 +312,7 @@ Distributed under the MIT License. See `LICENSE` for more information.
 2. Write tests first (TDD discipline)
 3. Make tests pass
 4. Refactor while keeping tests green
-5. Run `go test ./...` and `go vet ./...`
+5. Run `make check` (`go vet ./...` and `go test ./...`)
 6. Update `AGENTS.md` for architectural changes
 7. Submit a PR with [Conventional Commits](https://www.conventionalcommits.org/)
 

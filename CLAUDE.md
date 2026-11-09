@@ -113,12 +113,12 @@ agent-board/
 
 ## Build and Run
 
-```bash
-# Build
-go build -o agentboard ./cmd/agentboard
+Common tasks are `make` targets; `make` alone lists them (`run`, `build`,
+`install`, `test`, `test-integration`, `vet`, `check`, `clean`).
 
-# Run (TUI mode, default)
-./agentboard
+```bash
+# Build and run (TUI mode, default)
+make run
 
 # The HTTP API starts with the TUI on 127.0.0.1:7878 ([general] addr / api)
 curl localhost:7878/api/v1/board
@@ -130,7 +130,7 @@ ssh -L 7878:127.0.0.1:7878 host   # then the same curls locally
 ./agentboard init
 
 # Run tests
-go test ./...
+make test
 
 # Run with verbose logging
 AGENTBOARD_LOG=debug ./agentboard
@@ -604,7 +604,7 @@ Backlog -> In Progress            -> Review              -> Done
 2. **Write the test first** — every feature, bugfix, or refactor starts with a failing test in the relevant `_test.go` file
 3. Make the test pass with minimal implementation
 4. Refactor if needed, keeping tests green
-5. Run `go test ./...` and `go vet ./...`
+5. Run `make check` (`go vet ./...` and `go test ./...`)
 6. Update AGENT.md if architecture changes
 7. Submit PR with description linking to relevant ticket
 
