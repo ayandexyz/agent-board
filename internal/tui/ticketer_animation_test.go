@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ayan-de/agent-board/internal/theme"
+	"github.com/ayandexyz/agent-board/internal/theme"
 	"github.com/charmbracelet/lipgloss"
 	ansi "github.com/charmbracelet/x/ansi"
 )

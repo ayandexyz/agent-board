@@ -1,4 +1,4 @@
-module github.com/ayan-de/agent-board
+module github.com/ayandexyz/agent-board
 
 go 1.26.2
 

@@ -10,10 +10,10 @@ import (
 
 	"github.com/google/uuid"
 
-	"github.com/ayan-de/agent-board/internal/activity"
-	"github.com/ayan-de/agent-board/internal/agents"
-	"github.com/ayan-de/agent-board/internal/llm"
-	"github.com/ayan-de/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/activity"
+	"github.com/ayandexyz/agent-board/internal/agents"
+	"github.com/ayandexyz/agent-board/internal/llm"
+	"github.com/ayandexyz/agent-board/internal/store"
 )
 
 type Service struct {

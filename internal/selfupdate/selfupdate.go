@@ -13,7 +13,7 @@ import (
 	"time"
 )
 
-const DefaultRepo = "ayan-de/agent-board"
+const DefaultRepo = "ayandexyz/agent-board"
 
 type Release struct {
 	TagName string  `json:"tag_name"`

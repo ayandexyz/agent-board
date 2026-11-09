@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"sort"
 
-	"github.com/ayan-de/agent-board/internal/config"
+	"github.com/ayandexyz/agent-board/internal/config"
 	"github.com/tmc/langchaingo/llms"
 )
 

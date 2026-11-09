@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ayan-de/agent-board/internal/prompt"
+	"github.com/ayandexyz/agent-board/internal/prompt"
 )
 
 func TestGenerateProposalContainsContext(t *testing.T) {

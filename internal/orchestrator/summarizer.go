@@ -3,8 +3,8 @@ package orchestrator
 import (
 	"context"
 
-	"github.com/ayan-de/agent-board/internal/llm"
-	"github.com/ayan-de/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/llm"
+	"github.com/ayandexyz/agent-board/internal/store"
 )
 
 func (s *Service) FinishRun(ctx context.Context, input FinishRunInput) error {

@@ -9,7 +9,7 @@
 
 **Opensource TUI based Kanban board for orchestrating AI coding agents**
 
-[![Go Version](https://img.shields.io/github/go-mod/go-version/ayan-de/agent-board)](https://go.dev/)
+[![Go Version](https://img.shields.io/github/go-mod/go-version/ayandexyz/agent-board)](https://go.dev/)
 [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 [![Build Status](https://img.shields.io/badge/build-passing-brightgreen.svg)]()
 
@@ -56,7 +56,7 @@ For more information about AgentBoard, including feature showcases, screenshots,
 Run the automated installer:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/ayan-de/agent-board/main/install.sh | bash
+curl -sSL https://raw.githubusercontent.com/ayandexyz/agent-board/main/install.sh | bash
 ```
 
 This will detect your OS and architecture, install dependencies, and place the binary in `~/.local/bin`.
@@ -65,7 +65,7 @@ This will detect your OS and architecture, install dependencies, and place the b
 Ensure [Go](https://go.dev/doc/install) 1.21+ is installed.
 
 ```bash
-git clone https://github.com/ayan-de/agent-board.git
+git clone https://github.com/ayandexyz/agent-board.git
 cd agent-board
 make run        # builds ./agentboard and starts it
 

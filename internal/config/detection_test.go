@@ -13,13 +13,13 @@ func TestExtractProjectName(t *testing.T) {
 	}{
 		{
 			name:     "github HTTPS URL",
-			remote:   "https://github.com/ayan-de/agent-board.git",
+			remote:   "https://github.com/ayandexyz/agent-board.git",
 			fallback: "",
 			want:     "agent-board",
 		},
 		{
 			name:     "github SSH URL",
-			remote:   "git@github.com:ayan-de/agent-board.git",
+			remote:   "git@github.com:ayandexyz/agent-board.git",
 			fallback: "",
 			want:     "agent-board",
 		},

@@ -9,9 +9,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ayan-de/agent-board/internal/activity"
-	"github.com/ayan-de/agent-board/internal/orchestrator"
-	"github.com/ayan-de/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/activity"
+	"github.com/ayandexyz/agent-board/internal/orchestrator"
+	"github.com/ayandexyz/agent-board/internal/store"
 )
 
 func TestServiceCreateProposalRequiresAssignedAgent(t *testing.T) {

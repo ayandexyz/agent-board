@@ -3,7 +3,7 @@ package agents
 import (
 	"regexp"
 
-	"github.com/ayan-de/agent-board/internal/activity"
+	"github.com/ayandexyz/agent-board/internal/activity"
 )
 
 // freeCode reads Claude Code's settings format, so it is wired up exactly like

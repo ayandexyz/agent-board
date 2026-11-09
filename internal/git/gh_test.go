@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ayan-de/agent-board/internal/git"
+	"github.com/ayandexyz/agent-board/internal/git"
 )
 
 func TestPRCreate(t *testing.T) {

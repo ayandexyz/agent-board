@@ -3,7 +3,7 @@ package agents
 import (
 	"regexp"
 
-	"github.com/ayan-de/agent-board/internal/activity"
+	"github.com/ayandexyz/agent-board/internal/activity"
 )
 
 // claudeCode takes its hooks per process through `claude --settings`, so

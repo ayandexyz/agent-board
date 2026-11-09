@@ -1,8 +1,8 @@
 package main
 
 import (
-	"github.com/ayan-de/agent-board/internal/api"
-	"github.com/ayan-de/agent-board/internal/tmux"
+	"github.com/ayandexyz/agent-board/internal/api"
+	"github.com/ayandexyz/agent-board/internal/tmux"
 )
 
 // tmuxTerminals gives the API a viewer on the board's own tmux session.

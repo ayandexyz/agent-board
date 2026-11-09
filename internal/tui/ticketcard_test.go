@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ayan-de/agent-board/internal/store"
-	"github.com/ayan-de/agent-board/internal/theme"
+	"github.com/ayandexyz/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/theme"
 
 	"github.com/charmbracelet/lipgloss"
 )
