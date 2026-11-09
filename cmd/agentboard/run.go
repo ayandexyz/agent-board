@@ -154,6 +154,11 @@ func runTUI() int {
 				cfg.Git.BranchPrefix,
 				cfg.Git.BaseBranch,
 			)
+			wm.SetSetup(orchestrator.WorktreeSetup{
+				CopyFiles: cfg.Git.CopyFiles,
+				Script:    cfg.Git.SetupScript,
+				Run:       git.ExecRunner(),
+			})
 			orch.SetWorktrees(wm)
 			orch.SetMergeConfig(orchestrator.MergeStrategy(cfg.Git.MergeStrategy))
 		}

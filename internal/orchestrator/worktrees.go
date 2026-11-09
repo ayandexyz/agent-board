@@ -21,6 +21,8 @@ type WorktreeManager struct {
 
 	mu         sync.Mutex
 	baseBranch string
+
+	setup WorktreeSetup
 }
 
 func NewWorktreeManager(g *git.Git, gh *git.GH, repoRoot, worktreeRoot, branchPrefix, baseBranch string) *WorktreeManager {
@@ -88,6 +90,11 @@ func (m *WorktreeManager) Ensure(ctx context.Context, t store.Ticket) (WorktreeI
 	}
 
 	if err := m.git.WorktreeAdd(ctx, m.repoRoot, path, branch, base, !branchExists); err != nil {
+		return WorktreeInfo{}, fmt.Errorf("orchestrator.ensureWorktree: %w", err)
+	}
+
+	if err := m.prepare(ctx, path); err != nil {
+		_ = m.git.WorktreeRemove(context.WithoutCancel(ctx), m.repoRoot, path, true)
 		return WorktreeInfo{}, fmt.Errorf("orchestrator.ensureWorktree: %w", err)
 	}
 

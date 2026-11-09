@@ -94,6 +94,8 @@ default = "opencode"
 # worktree_root = ""         # default: ~/.agentboard/worktrees/<project>
 # branch_prefix = "agent/"   # used when a ticket has no branch set
 # base_branch = ""           # default: auto-detect main/master
+# copy_files = [".env"]      # copied from the repo into each new worktree (globs ok)
+# setup_script = ""          # run in each new worktree before the agent starts, e.g. "npm install"
 
 [mcp]
 npm_path = "npm"

@@ -3,10 +3,12 @@ package config
 import "path/filepath"
 
 type GitConfig struct {
-	MergeStrategy string `toml:"merge_strategy"`
-	WorktreeRoot  string `toml:"worktree_root"`
-	BranchPrefix  string `toml:"branch_prefix"`
-	BaseBranch    string `toml:"base_branch"`
+	MergeStrategy string   `toml:"merge_strategy"`
+	WorktreeRoot  string   `toml:"worktree_root"`
+	BranchPrefix  string   `toml:"branch_prefix"`
+	BaseBranch    string   `toml:"base_branch"`
+	SetupScript   string   `toml:"setup_script"`
+	CopyFiles     []string `toml:"copy_files"`
 }
 
 func (g GitConfig) ResolvedWorktreeRoot(baseDir, projectName string) string {

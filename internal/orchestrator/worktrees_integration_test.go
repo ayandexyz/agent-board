@@ -169,3 +169,49 @@ func TestIntegrationDirtyWorktreeRefusesRemove(t *testing.T) {
 		t.Error("uncommitted work must survive")
 	}
 }
+
+func TestIntegrationWorktreeSetup(t *testing.T) {
+	repo := initRepo(t)
+	if err := os.WriteFile(filepath.Join(repo, ".gitignore"), []byte(".env\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "git", "add", ".")
+	gitRun(t, repo, "git", "commit", "-m", "ignore env")
+	if err := os.WriteFile(filepath.Join(repo, ".env"), []byte("TOKEN=abc\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	ctx := context.Background()
+	g := git.New(git.ExecRunner())
+	wm := orchestrator.NewWorktreeManager(g, git.NewGH(git.ExecRunner()), repo, filepath.Join(t.TempDir(), "worktrees"), "agent/", "")
+	wm.SetSetup(orchestrator.WorktreeSetup{
+		CopyFiles: []string{".env"},
+		Script:    "grep -q TOKEN .env && touch installed",
+		Run:       git.ExecRunner(),
+	})
+
+	info, err := wm.Ensure(ctx, store.Ticket{ID: "AGT-01"})
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	if _, err := os.Stat(filepath.Join(info.Path, "installed")); err != nil {
+		t.Errorf("setup script did not run in the worktree: %v", err)
+	}
+
+	wm.SetSetup(orchestrator.WorktreeSetup{Script: "exit 3", Run: git.ExecRunner()})
+	if _, err := wm.Ensure(ctx, store.Ticket{ID: "AGT-02"}); err == nil {
+		t.Fatal("Ensure with failing setup succeeded")
+	}
+	wts, err := g.WorktreeList(ctx, repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, p := range wts {
+		if filepath.Base(p) == "AGT-02" {
+			t.Errorf("failed worktree %s still registered", p)
+		}
+	}
+	if _, err := wm.Ensure(ctx, store.Ticket{ID: "AGT-02"}); err == nil {
+		t.Error("retry should run setup again and fail again, not reuse a half-made worktree")
+	}
+}

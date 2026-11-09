@@ -138,3 +138,30 @@ func TestResolvedWorktreeRoot(t *testing.T) {
 		})
 	}
 }
+
+func TestLoadFromFileGitSetup(t *testing.T) {
+	dir := t.TempDir()
+	cfgPath := filepath.Join(dir, "config.toml")
+
+	content := []byte(`
+[git]
+setup_script = "pnpm install"
+copy_files = [".env", "config/*.local.json"]
+`)
+	if err := os.WriteFile(cfgPath, content, 0644); err != nil {
+		t.Fatalf("write config: %v", err)
+	}
+
+	cfg := SetDefaults()
+	if err := loadFromFile(cfg, cfgPath); err != nil {
+		t.Fatalf("loadFromFile: %v", err)
+	}
+
+	if cfg.Git.SetupScript != "pnpm install" {
+		t.Errorf("Git.SetupScript = %q, want %q", cfg.Git.SetupScript, "pnpm install")
+	}
+	want := []string{".env", "config/*.local.json"}
+	if len(cfg.Git.CopyFiles) != len(want) || cfg.Git.CopyFiles[0] != want[0] || cfg.Git.CopyFiles[1] != want[1] {
+		t.Errorf("Git.CopyFiles = %v, want %v", cfg.Git.CopyFiles, want)
+	}
+}
