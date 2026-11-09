@@ -8,7 +8,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ayan-de/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/store"
 )
 
 type recordedRequest struct {

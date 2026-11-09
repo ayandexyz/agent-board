@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ayan-de/agent-board/internal/llm"
+	"github.com/ayandexyz/agent-board/internal/llm"
 	"github.com/tmc/langchaingo/llms"
 )
 

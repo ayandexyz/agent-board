@@ -1225,7 +1225,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ayan-de/agent-board/internal/theme"
+	"github.com/ayandexyz/agent-board/internal/theme"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -1493,7 +1493,7 @@ func NewKanbanModel(s *store.Store, resolver *keybinding.Resolver, t *theme.Them
 }
 ```
 
-Add import: `"github.com/ayan-de/agent-board/internal/theme"`
+Add import: `"github.com/ayandexyz/agent-board/internal/theme"`
 
 Keep `DefaultKanbanStyles()` as a wrapper for backward compat in tests:
 
@@ -1556,7 +1556,7 @@ func NewTicketViewModel(s *store.Store, resolver *keybinding.Resolver, t *theme.
 }
 ```
 
-Add import: `"github.com/ayan-de/agent-board/internal/theme"`
+Add import: `"github.com/ayandexyz/agent-board/internal/theme"`
 
 - [ ] **Step 3: Update dashboard.go**
 
@@ -1603,7 +1603,7 @@ func NewDashboardModel(s *store.Store, resolver *keybinding.Resolver, agents []c
 }
 ```
 
-Add import: `"github.com/ayan-de/agent-board/internal/theme"`
+Add import: `"github.com/ayandexyz/agent-board/internal/theme"`
 
 - [ ] **Step 4: Fix all tests that call the old constructors**
 
@@ -1638,7 +1638,7 @@ func newTestKanban(t *testing.T) KanbanModel {
 }
 ```
 
-Add import: `"github.com/ayan-de/agent-board/internal/theme"`
+Add import: `"github.com/ayandexyz/agent-board/internal/theme"`
 
 Similarly update `app_test.go`'s `newTestApp` — but that's handled in Task 8 when we wire the registry.
 
@@ -1930,10 +1930,10 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/ayan-de/agent-board/internal/config"
-	"github.com/ayan-de/agent-board/internal/store"
-	"github.com/ayan-de/agent-board/internal/theme"
-	"github.com/ayan-de/agent-board/internal/tui"
+	"github.com/ayandexyz/agent-board/internal/config"
+	"github.com/ayandexyz/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/theme"
+	"github.com/ayandexyz/agent-board/internal/tui"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -2006,7 +2006,7 @@ func newTestApp(t *testing.T) *App {
 }
 ```
 
-Add imports: `"github.com/ayan-de/agent-board/internal/theme"`, `"github.com/charmbracelet/lipgloss"`.
+Add imports: `"github.com/ayandexyz/agent-board/internal/theme"`, `"github.com/charmbracelet/lipgloss"`.
 
 - [ ] **Step 6: Run all tests**
 

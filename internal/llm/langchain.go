@@ -6,7 +6,7 @@ import (
 	"regexp"
 	"strings"
 
-	"github.com/ayan-de/agent-board/internal/prompt"
+	"github.com/ayandexyz/agent-board/internal/prompt"
 	"github.com/tmc/langchaingo/llms"
 )
 

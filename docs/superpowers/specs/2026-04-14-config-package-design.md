@@ -98,7 +98,7 @@ Each step overwrites only fields that are explicitly set. Absent fields retain t
 
 When `agentboard` starts:
 
-1. Run `git remote get-url origin` → extract repo name (e.g., `agent-board` from `github.com/ayan-de/agent-board`)
+1. Run `git remote get-url origin` → extract repo name (e.g., `agent-board` from `github.com/ayandexyz/agent-board`)
 2. Fallback: use current working directory basename
 3. Slugify the name (lowercase, replace non-alphanumeric with `-`)
 4. Use `~/.agentboard/projects/<slug>/` as the project directory

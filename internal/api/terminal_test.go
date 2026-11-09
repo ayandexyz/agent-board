@@ -12,8 +12,8 @@ import (
 
 	"github.com/coder/websocket"
 
-	"github.com/ayan-de/agent-board/internal/api"
-	"github.com/ayan-de/agent-board/internal/orchestrator"
+	"github.com/ayandexyz/agent-board/internal/api"
+	"github.com/ayandexyz/agent-board/internal/orchestrator"
 )
 
 // echoTerminal echoes every byte written to it back out, upper-cased, and

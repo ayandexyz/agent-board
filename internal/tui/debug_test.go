@@ -4,9 +4,9 @@ import (
     "path/filepath"
     "strings"
     "testing"
-    "github.com/ayan-de/agent-board/internal/config"
-    "github.com/ayan-de/agent-board/internal/keybinding"
-    "github.com/ayan-de/agent-board/internal/store"
+    "github.com/ayandexyz/agent-board/internal/config"
+    "github.com/ayandexyz/agent-board/internal/keybinding"
+    "github.com/ayandexyz/agent-board/internal/store"
 )
 
 func TestDebugDashboardNotFound(t *testing.T) {

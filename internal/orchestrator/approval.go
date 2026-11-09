@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ayan-de/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/store"
 )
 
 func (s *Service) ApproveProposal(ctx context.Context, proposalID string) error {

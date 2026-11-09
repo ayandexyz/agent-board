@@ -639,7 +639,7 @@ import (
     "context"
     "fmt"
 
-    "github.com/ayan-de/agent-board/internal/pty"
+    "github.com/ayandexyz/agent-board/internal/pty"
 )
 
 type PtyRunner struct {

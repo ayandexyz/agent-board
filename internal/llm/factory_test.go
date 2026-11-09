@@ -3,8 +3,8 @@ package llm_test
 import (
 	"testing"
 
-	"github.com/ayan-de/agent-board/internal/config"
-	"github.com/ayan-de/agent-board/internal/llm"
+	"github.com/ayandexyz/agent-board/internal/config"
+	"github.com/ayandexyz/agent-board/internal/llm"
 )
 
 func TestFactoryReturnsClientWithOpenAI(t *testing.T) {

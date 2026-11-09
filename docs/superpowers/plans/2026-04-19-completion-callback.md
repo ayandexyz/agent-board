@@ -405,7 +405,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ayan-de/agent-board/internal/orchestrator"
+	"github.com/ayandexyz/agent-board/internal/orchestrator"
 )
 
 func TestParseOpencodeOutputCompleted(t *testing.T) {
@@ -496,7 +496,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ayan-de/agent-board/internal/orchestrator"
+	"github.com/ayandexyz/agent-board/internal/orchestrator"
 )
 
 func TestParseOpencodeOutputCompleted(t *testing.T) {

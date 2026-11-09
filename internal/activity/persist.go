@@ -5,7 +5,7 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/ayan-de/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/store"
 )
 
 // Store is what the receiver writes through to. Every write is best effort:

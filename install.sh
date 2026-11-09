@@ -1,7 +1,7 @@
 #!/bin/bash
 set -e
 
-REPO="ayan-de/agent-board"
+REPO="ayandexyz/agent-board"
 BASE_URL="https://github.com/${REPO}/releases/latest/download"
 INSTALL_DIR="${HOME}/.local/bin"
 

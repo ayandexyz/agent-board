@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ayan-de/agent-board/internal/activity"
-	"github.com/ayan-de/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/activity"
+	"github.com/ayandexyz/agent-board/internal/store"
 )
 
 type fakeActivity struct {

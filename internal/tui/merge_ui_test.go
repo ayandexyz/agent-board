@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ayan-de/agent-board/internal/orchestrator"
-	"github.com/ayan-de/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/orchestrator"
+	"github.com/ayandexyz/agent-board/internal/store"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
