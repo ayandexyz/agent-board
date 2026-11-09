@@ -20,6 +20,15 @@ func TestFreeCodeReadyPatternMatchesBanner(t *testing.T) {
 	}
 }
 
+func TestFreeCodeReadyPatternMatchesHisthBanner(t *testing.T) {
+	cfg := NewFreeCode()
+
+	banner := StripANSI("                       >_ Histh! (v0.48.1)                      ")
+	if !cfg.ReadyPattern.MatchString(banner) {
+		t.Fatal("FreeCode ships as Histh! since v0.4x; its banner should mark the agent as ready")
+	}
+}
+
 func TestFreeCodeIsInteractiveTUI(t *testing.T) {
 	cfg := NewFreeCode()
 

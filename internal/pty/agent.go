@@ -156,11 +156,11 @@ func NewFreeCode() *Config {
 		Name:         "freecode",
 		Bin:          "freecode",
 		Args:         []string{},
-		ReadyPattern: regexp.MustCompile(`>_\s+FreeCode`),
+		ReadyPattern: regexp.MustCompile(`>_\s+(?:FreeCode|Histh!)`),
 		SendPrompt:   SendPromptSingleLine,
 		FormatPrompt: DefaultFormatPrompt,
 		IdlePatterns: []*regexp.Regexp{
-			regexp.MustCompile(`>_\s+FreeCode`),
+			regexp.MustCompile(`>_\s+(?:FreeCode|Histh!)`),
 			regexp.MustCompile(`(?m)^❯\s*$`),
 		},
 		GracePeriod:     8 * time.Second,
