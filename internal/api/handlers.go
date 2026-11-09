@@ -33,6 +33,7 @@ func (s *Server) routes() {
 	m.HandleFunc("POST /api/v1/tickets/{id}/start", s.handleStart)
 	m.HandleFunc("POST /api/v1/tickets/{id}/complete", s.handleComplete)
 	m.HandleFunc("POST /api/v1/tickets/{id}/merge", s.handleMerge)
+	m.HandleFunc("GET /api/v1/tickets/{id}/diff", s.handleDiff)
 
 	m.HandleFunc("GET /api/v1/terminal", s.handleTerminal)
 	m.HandleFunc("GET /api/v1/sessions", s.handleListSessions)
@@ -125,6 +126,24 @@ func (s *Server) handleGetTicket(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	writeJSON(w, http.StatusOK, s.ticketDTO(t, s.sessionsByTicket()))
+}
+
+func (s *Server) handleDiff(w http.ResponseWriter, r *http.Request) {
+	id := r.PathValue("id")
+	d, err := s.Board.TicketDiff(r.Context(), id)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	out := apitypes.TicketDiff{TicketID: id, Base: d.Base, Patch: d.Patch, Files: []apitypes.FileChange{}}
+	for _, f := range d.Files {
+		out.Added += f.Added
+		out.Deleted += f.Deleted
+		out.Files = append(out.Files, apitypes.FileChange{
+			Path: f.Path, Added: f.Added, Deleted: f.Deleted, Binary: f.Binary, Untracked: f.Untracked,
+		})
+	}
+	writeJSON(w, http.StatusOK, out)
 }
 
 func (s *Server) handleUpdateTicket(w http.ResponseWriter, r *http.Request) {
@@ -491,7 +510,8 @@ func writeErr(w http.ResponseWriter, err error) {
 		errors.Is(err, orchestrator.ErrUnknownAgent):
 		writeError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, orchestrator.ErrTicketBusy),
-		errors.Is(err, orchestrator.ErrInputSuppressed):
+		errors.Is(err, orchestrator.ErrInputSuppressed),
+		errors.Is(err, orchestrator.ErrNoRepository):
 		writeError(w, http.StatusConflict, err.Error())
 	default:
 		writeError(w, http.StatusInternalServerError, err.Error())

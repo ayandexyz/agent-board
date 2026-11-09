@@ -24,6 +24,7 @@ type Service struct {
 	ctx           ContextCarryProvider
 	worktrees     Worktrees
 	merger        Merger
+	differ        Differ
 	mergeStrategy MergeStrategy
 	branchPrefix  string
 	logs          map[string][]string
@@ -217,6 +218,9 @@ func (s *Service) SetWorktrees(w Worktrees) {
 	s.worktrees = w
 	if m, ok := w.(Merger); ok {
 		s.merger = m
+	}
+	if d, ok := w.(Differ); ok {
+		s.differ = d
 	}
 }
 

@@ -419,6 +419,7 @@ Routes, all under `/api/v1`:
 | `POST /tickets/{id}/start` `{agent?, prompt?}` | `StartAdHocRun` on the ticket's own agent and prompt unless overridden |
 | `POST /tickets/{id}/complete` | `CompleteTicket`; `409` with `merge_required` when unmerged work exists |
 | `POST /tickets/{id}/merge` `{strategy?}` | `MergeTicket` |
+| `GET /tickets/{id}/diff` | `TicketDiff`: everything the ticket changed (committed, uncommitted and new files) against the point it branched from; per-file `+/-` counts and a unified `patch`. `409` outside a git repo |
 | `GET /sessions` | active sessions with tmux window, activity state, held tool and `decidable` |
 | `GET /sessions/{id}/screen?lines=` | `capture-pane` text |
 | `POST /sessions/{id}/stop` · `/input` `{text}` · `/resolve` `{decision}` | stop, type into the pane (refused `409` while blocked/exited), answer a held permission |

@@ -215,3 +215,56 @@ func TestIntegrationWorktreeSetup(t *testing.T) {
 		t.Error("retry should run setup again and fail again, not reuse a half-made worktree")
 	}
 }
+
+func TestIntegrationTicketDiff(t *testing.T) {
+	repo := initRepo(t)
+	ctx := context.Background()
+	g := git.New(git.ExecRunner())
+	wm := orchestrator.NewWorktreeManager(g, git.NewGH(git.ExecRunner()), repo, filepath.Join(t.TempDir(), "worktrees"), "agent/", "")
+
+	info, err := wm.Ensure(ctx, store.Ticket{ID: "AGT-01"})
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(info.Path, "committed.txt"), []byte("one\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, info.Path, "git", "add", ".")
+	gitRun(t, info.Path, "git", "commit", "-m", "agent commit")
+	if err := os.WriteFile(filepath.Join(info.Path, "a.txt"), []byte("hello\nworld\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(info.Path, "brand-new.txt"), []byte("fresh\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	if err := os.WriteFile(filepath.Join(repo, "on-main.txt"), []byte("main moved\n"), 0644); err != nil {
+		t.Fatal(err)
+	}
+	gitRun(t, repo, "git", "add", ".")
+	gitRun(t, repo, "git", "commit", "-m", "main moves on")
+
+	d, err := wm.Diff(ctx, store.Ticket{ID: "AGT-01", WorktreePath: info.Path})
+	if err != nil {
+		t.Fatalf("Diff: %v", err)
+	}
+	got := map[string]git.FileChange{}
+	for _, f := range d.Files {
+		got[f.Path] = f
+	}
+	if f := got["committed.txt"]; f.Added != 1 {
+		t.Errorf("committed.txt = %+v, want 1 added", f)
+	}
+	if f := got["a.txt"]; f.Added != 1 {
+		t.Errorf("a.txt = %+v, want 1 added (uncommitted edit)", f)
+	}
+	if f := got["brand-new.txt"]; !f.Untracked || f.Added != 1 {
+		t.Errorf("brand-new.txt = %+v, want untracked with 1 line", f)
+	}
+	if _, ok := got["on-main.txt"]; ok {
+		t.Error("diff includes work done on main after the ticket branched")
+	}
+	if len(d.Files) != 3 {
+		t.Errorf("Files = %+v, want exactly 3", d.Files)
+	}
+}

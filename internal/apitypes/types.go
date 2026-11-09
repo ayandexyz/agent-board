@@ -92,6 +92,23 @@ type MergeResult struct {
 	Detail  string `json:"detail,omitempty"`
 }
 
+type FileChange struct {
+	Path      string `json:"path"`
+	Added     int    `json:"added"`
+	Deleted   int    `json:"deleted"`
+	Binary    bool   `json:"binary,omitempty"`
+	Untracked bool   `json:"untracked,omitempty"`
+}
+
+type TicketDiff struct {
+	TicketID string       `json:"ticket_id"`
+	Base     string       `json:"base,omitempty"`
+	Added    int          `json:"added"`
+	Deleted  int          `json:"deleted"`
+	Files    []FileChange `json:"files"`
+	Patch    string       `json:"patch"`
+}
+
 type Session struct {
 	ID        string    `json:"id"`
 	TicketID  string    `json:"ticket_id,omitempty"`

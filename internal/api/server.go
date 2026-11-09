@@ -34,6 +34,7 @@ type Board interface {
 	MoveTicketStatus(ctx context.Context, id, status string) error
 	CompleteTicket(ctx context.Context, id string) error
 	MergeTicket(ctx context.Context, id string, strategy orchestrator.MergeStrategy) (orchestrator.MergeResult, error)
+	TicketDiff(ctx context.Context, id string) (orchestrator.TicketDiff, error)
 	DeleteTicket(ctx context.Context, id string) error
 	StartAdHocRun(ctx context.Context, ticketID, agent, prompt string) (store.Session, error)
 	StopSession(ctx context.Context, sessionID string) error

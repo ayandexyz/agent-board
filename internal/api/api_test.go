@@ -35,6 +35,8 @@ type fakeBoard struct {
 	inputErr        error
 	deleted         string
 	branchModeCalls []string
+	diff            orchestrator.TicketDiff
+	diffErr         error
 }
 
 func newFakeBoard() *fakeBoard {
