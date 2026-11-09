@@ -29,6 +29,12 @@ type Attachment struct {
 func AttachCommands(base, name, windowID string, cols, rows int) (setup [][]string, attach []string) {
 	setup = append(setup, []string{"tmux", "new-session", "-d", "-t", base, "-s", name,
 		"-x", strconv.Itoa(cols), "-y", strconv.Itoa(rows)})
+	// Session option, so only the viewer is affected. tmux then asks xterm to
+	// report wheel events, so a phone swipe scrolls whatever owns the pane:
+	// the program if it tracks the mouse (full-screen TUIs), else tmux
+	// copy-mode over the pane history. Without it a swipe on a shell pane
+	// goes nowhere, since the client only holds the live screen.
+	setup = append(setup, []string{"tmux", "set-option", "-t", name, "mouse", "on"})
 	if windowID != "" {
 		setup = append(setup, []string{"tmux", "select-window", "-t", name + ":" + windowID})
 	}
