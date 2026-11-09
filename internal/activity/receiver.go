@@ -227,7 +227,7 @@ func (r *Receiver) apply(sessionID, launchID string, p payload) bool {
 		s.ToolName = p.ToolName
 	}
 	if next.NeedsInput() {
-		s.Detail = toolDetail(s.ToolName, p.ToolInput)
+		s.Detail = p.detail(s.ToolName)
 	}
 	entered := !prev.NeedsInput() && next.NeedsInput()
 	title, body := r.alertText(*s)

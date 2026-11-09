@@ -37,6 +37,12 @@ func TestToolDetailReadsTheInterestingField(t *testing.T) {
 			want:  "Edit: /repo/main.go",
 		},
 		{
+			name:  "a camelCase path is the path",
+			tool:  "edit",
+			input: `{"filePath":"/repo/main.go","oldString":"a","newString":"b"}`,
+			want:  "edit: /repo/main.go",
+		},
+		{
 			name:  "a fetch is the url",
 			tool:  "WebFetch",
 			input: `{"url":"https://example.com/x","prompt":"summarise"}`,

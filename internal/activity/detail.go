@@ -11,7 +11,7 @@ const detailLimit = 120
 // toolFields names the one argument worth reading for each tool, in the order
 // they are tried. Anything unlisted shows as the bare tool name: a raw JSON
 // dump of the arguments is noise in a notification.
-var toolFields = []string{"command", "file_path", "path", "url", "pattern", "description", "prompt"}
+var toolFields = []string{"command", "file_path", "filePath", "path", "url", "pattern", "description", "prompt"}
 
 // toolDetail renders a tool call as a line a human can act on.
 func toolDetail(toolName string, toolInput []byte) string {

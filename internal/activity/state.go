@@ -2,7 +2,10 @@
 // the agents POST back to a loopback receiver.
 package activity
 
-import "encoding/json"
+import (
+	"encoding/json"
+	"strings"
+)
 
 type State string
 
@@ -19,11 +22,12 @@ func (s State) NeedsInput() bool {
 	return s == StateWaitingInput || s == StateBlocked
 }
 
-// payload is the Claude Code hook shape. FreeCode emits the same fields, so
-// there is no per-agent mapper.
+// payload is the Claude Code hook shape. FreeCode's hooks emit the same
+// fields, so there is no per-agent mapper.
 type payload struct {
 	HookEventName    string          `json:"hook_event_name"`
 	NotificationType string          `json:"notification_type"`
+	Message          string          `json:"message"`
 	ToolName         string          `json:"tool_name"`
 	ToolInput        json.RawMessage `json:"tool_input"`
 	Reason           string          `json:"reason"`
@@ -52,13 +56,22 @@ func (p payload) next() (State, bool) {
 		switch p.NotificationType {
 		case "permission_prompt":
 			return StateBlocked, true
-		case "agent_needs_input":
+		case "agent_needs_input", "question":
 			return StateWaitingInput, true
 		case "idle_prompt":
 			return StateIdle, true
 		}
 	}
 	return "", false
+}
+
+// detail is the line an alert shows: the tool call when the payload carries
+// one, otherwise the notification's own message.
+func (p payload) detail(toolName string) string {
+	if len(p.ToolInput) == 0 && strings.TrimSpace(p.Message) != "" {
+		return truncate(collapse(p.Message), detailLimit)
+	}
+	return toolDetail(toolName, p.ToolInput)
 }
 
 // asksQuestion reports whether a permission request is really a question.
