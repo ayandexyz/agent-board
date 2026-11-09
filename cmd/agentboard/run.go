@@ -26,6 +26,11 @@ import (
 // runTUI launches the Kanban TUI, re-executing inside a tmux session first
 // if not already running in one. It returns the process exit code.
 func runTUI() int {
+	if err := preflight(exec.LookPath); err != nil {
+		fmt.Fprintln(os.Stderr, err)
+		return 1
+	}
+
 	cfg, err := config.Load()
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error loading config: %v\n", err)

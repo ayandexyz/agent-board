@@ -114,7 +114,14 @@ agent-board/
 ## Build and Run
 
 Common tasks are `make` targets; `make` alone lists them (`run`, `build`,
-`install`, `test`, `test-integration`, `vet`, `check`, `clean`).
+`install`, `dist`, `test`, `test-integration`, `vet`, `check`, `clean`).
+
+Releases: push a `v*` tag and `.github/workflows/release.yml` runs `make check`
+and `make dist`, then publishes the five binaries plus `checksums.txt`. Users
+install with `curl -fsSL https://agentboard.ayande.xyz/install.sh | bash` and
+update with `agentboard update`; both refuse a download whose SHA-256 does not
+match. `install.sh`/`uninstall.sh` here are the source of truth, copied to
+`agentboard-web/public/`. See `docs/RELEASE.md`.
 
 ```bash
 # Build and run (TUI mode, default)
@@ -125,9 +132,6 @@ curl localhost:7878/api/v1/board
 curl -N localhost:7878/api/v1/events
 # From another machine, through SSH:
 ssh -L 7878:127.0.0.1:7878 host   # then the same curls locally
-
-# Initialize config
-./agentboard init
 
 # Run tests
 make test

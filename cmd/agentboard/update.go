@@ -1,16 +1,21 @@
 package main
 
 import (
+	"errors"
 	"flag"
 	"fmt"
 	"io"
+	"io/fs"
 	"os"
+	"path/filepath"
 	"runtime"
 
 	"github.com/ayandexyz/agent-board/internal/cli"
 	"github.com/ayandexyz/agent-board/internal/selfupdate"
 	"github.com/ayandexyz/agent-board/internal/version"
 )
+
+const installScriptURL = "https://agentboard.ayande.xyz/install.sh"
 
 func updateCommand() cli.Command {
 	return cli.Command{
@@ -48,10 +53,19 @@ func runUpdate(out io.Writer, args []string) int {
 
 	fmt.Fprintf(out, "updating agentboard %s -> %s...\n", version.Version, rel.TagName)
 	if err := selfupdate.Apply(fetcher, rel, execPath, runtime.GOOS, runtime.GOARCH); err != nil {
-		fmt.Fprintf(out, "update failed: %v\n", err)
+		fmt.Fprintln(out, updateFailure(err, execPath))
 		return 1
 	}
 
 	fmt.Fprintf(out, "updated to %s\n", rel.TagName)
 	return 0
+}
+
+func updateFailure(err error, execPath string) string {
+	msg := fmt.Sprintf("update failed: %v", err)
+	if errors.Is(err, fs.ErrPermission) {
+		msg += fmt.Sprintf("\n%s is not writable by you; re-run with sudo, or reinstall to ~/.local/bin:\n  curl -fsSL %s | bash",
+			filepath.Dir(execPath), installScriptURL)
+	}
+	return msg
 }

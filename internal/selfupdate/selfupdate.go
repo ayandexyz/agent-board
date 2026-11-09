@@ -4,12 +4,16 @@
 package selfupdate
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"os"
 	"path/filepath"
+	"strconv"
+	"strings"
 	"time"
 )
 
@@ -103,36 +107,82 @@ func AssetName(goos, goarch string) (string, error) {
 	return fmt.Sprintf("agentboard-%s-%s", goos, arch), nil
 }
 
-// Check fetches the latest release and reports whether it differs from
-// currentVersion. A currentVersion of "dev" (unset/local build) always
-// needs an update.
+// ChecksumsAsset is the release asset listing "<sha256>  <asset>" for
+// every binary, written by .github/workflows/release.yml.
+const ChecksumsAsset = "checksums.txt"
+
+// IsNewer reports whether latest is a strictly higher version than current,
+// comparing dotted numeric parts with any leading "v" dropped. A part that
+// is not a number counts as 0, so "dev" is older than every release and a
+// prerelease never outranks its own release.
+func IsNewer(latest, current string) bool {
+	a, b := versionParts(latest), versionParts(current)
+	for i := 0; i < len(a) || i < len(b); i++ {
+		var x, y int
+		if i < len(a) {
+			x = a[i]
+		}
+		if i < len(b) {
+			y = b[i]
+		}
+		if x != y {
+			return x > y
+		}
+	}
+	return false
+}
+
+func versionParts(v string) []int {
+	v = strings.TrimPrefix(v, "v")
+	if i := strings.IndexAny(v, "-+"); i >= 0 {
+		v = v[:i]
+	}
+	fields := strings.Split(v, ".")
+	parts := make([]int, len(fields))
+	for i, f := range fields {
+		parts[i], _ = strconv.Atoi(f)
+	}
+	return parts
+}
+
+// Check fetches the latest release and reports whether it is newer than
+// currentVersion. A "dev" build (no version stamped in) is older than any
+// release.
 func Check(f Fetcher, currentVersion string) (release *Release, needsUpdate bool, err error) {
 	rel, err := f.FetchLatestRelease()
 	if err != nil {
 		return nil, false, fmt.Errorf("selfupdate.Check: %w", err)
 	}
-	needsUpdate = currentVersion == "dev" || currentVersion != rel.TagName
-	return rel, needsUpdate, nil
+	return rel, IsNewer(rel.TagName, currentVersion), nil
 }
 
-// Apply downloads the release asset matching goos/goarch and atomically
-// replaces the executable at execPath. The existing executable is left
-// untouched if any step fails.
+// Apply downloads the release asset matching goos/goarch, verifies it
+// against the release's checksums.txt and atomically replaces the
+// executable at execPath. A symlinked execPath has its target replaced so
+// the link survives. The existing executable is left untouched if any step
+// fails.
 func Apply(f Fetcher, release *Release, execPath, goos, goarch string) error {
 	assetName, err := AssetName(goos, goarch)
 	if err != nil {
 		return fmt.Errorf("selfupdate.Apply: %w", err)
 	}
 
-	var asset *Asset
-	for i := range release.Assets {
-		if release.Assets[i].Name == assetName {
-			asset = &release.Assets[i]
-			break
-		}
-	}
+	asset := findAsset(release, assetName)
 	if asset == nil {
 		return fmt.Errorf("selfupdate.Apply: no release asset named %q", assetName)
+	}
+	sums := findAsset(release, ChecksumsAsset)
+	if sums == nil {
+		return fmt.Errorf("selfupdate.Apply: release %s has no %s to verify against", release.TagName, ChecksumsAsset)
+	}
+
+	want, err := expectedSum(f, sums.BrowserDownloadURL, assetName)
+	if err != nil {
+		return fmt.Errorf("selfupdate.Apply: %w", err)
+	}
+
+	if resolved, err := filepath.EvalSymlinks(execPath); err == nil {
+		execPath = resolved
 	}
 
 	body, err := f.Download(asset.BrowserDownloadURL)
@@ -149,12 +199,16 @@ func Apply(f Fetcher, release *Release, execPath, goos, goarch string) error {
 	tmpPath := tmp.Name()
 	defer os.Remove(tmpPath) // no-op once renamed into place
 
-	if _, err := io.Copy(tmp, body); err != nil {
+	hash := sha256.New()
+	if _, err := io.Copy(io.MultiWriter(tmp, hash), body); err != nil {
 		tmp.Close()
 		return fmt.Errorf("selfupdate.Apply: downloading %s: %w", assetName, err)
 	}
 	if err := tmp.Close(); err != nil {
 		return fmt.Errorf("selfupdate.Apply: %w", err)
+	}
+	if got := hex.EncodeToString(hash.Sum(nil)); got != want {
+		return fmt.Errorf("selfupdate.Apply: checksum mismatch for %s: got %s, want %s", assetName, got, want)
 	}
 	if err := os.Chmod(tmpPath, 0o755); err != nil {
 		return fmt.Errorf("selfupdate.Apply: %w", err)
@@ -164,4 +218,32 @@ func Apply(f Fetcher, release *Release, execPath, goos, goarch string) error {
 	}
 
 	return nil
+}
+
+func findAsset(release *Release, name string) *Asset {
+	for i := range release.Assets {
+		if release.Assets[i].Name == name {
+			return &release.Assets[i]
+		}
+	}
+	return nil
+}
+
+func expectedSum(f Fetcher, url, assetName string) (string, error) {
+	body, err := f.Download(url)
+	if err != nil {
+		return "", err
+	}
+	defer body.Close()
+	data, err := io.ReadAll(io.LimitReader(body, 1<<20))
+	if err != nil {
+		return "", fmt.Errorf("reading %s: %w", ChecksumsAsset, err)
+	}
+	for _, line := range strings.Split(string(data), "\n") {
+		fields := strings.Fields(line)
+		if len(fields) == 2 && strings.TrimPrefix(fields[1], "*") == assetName {
+			return strings.ToLower(fields[0]), nil
+		}
+	}
+	return "", fmt.Errorf("%s lists no checksum for %s", ChecksumsAsset, assetName)
 }

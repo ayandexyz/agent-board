@@ -1,123 +1,82 @@
 # Release Guide
 
-This document covers how to ship a new version of AgentBoard.
+How to ship a new version of AgentBoard.
 
 ---
 
-## Prerequisites
+## Cutting a release
 
-- GitHub repo: `ayandexyz/agent-board`
-- GitHub CLI (`gh`) authenticated: `gh auth login`
-- Docker (for cross-platform builds — darwin builds must happen on macOS runners; for now we'll use GitHub Actions which handles all platforms)
-
----
-
-## Step 1: Prepare the release
-
-Ensure `main` is clean and all tests pass locally:
+From an up-to-date, green `main`:
 
 ```bash
-go test ./...
-git checkout main
-git pull origin main
+git checkout main && git pull origin main
+make check
+git tag -a v0.2.0 -m "Release v0.2.0"
+git push origin v0.2.0
 ```
+
+That is all. Pushing a `v*` tag runs `.github/workflows/release.yml`, which:
+
+1. Runs `make check` (vet + unit tests).
+2. Runs `make dist VERSION=<tag>`: cross-compiles the five binaries below
+   with `CGO_ENABLED=0` and the tag stamped into `internal/version.Version`,
+   then writes `dist/checksums.txt` (`sha256sum` format).
+3. Checks the linux binary's `--version` prints the tag.
+4. Publishes a GitHub release with generated notes and every file in
+   `dist/` attached. A tag with a `-` (e.g. `v0.3.0-rc1`) is published as a
+   prerelease and does not become "latest".
+
+Watch it with `gh run watch` or at
+https://github.com/ayandexyz/agent-board/actions.
+
+`make dist VERSION=v0.2.0` builds the same artifacts locally.
 
 ---
 
-## Step 2: Bump the version
-
-Pick a version number following [semver](https://semver.org/):
-
-```
-v0.1.0  — initial release
-v0.2.0  — new features, no breaking changes
-v1.0.0  — first stable release
-```
-
-Tag the commit:
+## How users get it
 
 ```bash
-git tag -a v0.1.0 -m "Release v0.1.0"
-git push origin v0.1.0
+curl -fsSL https://agentboard.ayande.xyz/install.sh | bash
 ```
 
----
+`install.sh` in this repo is the source of truth. The marketing site
+(`agentboard-web`) serves a copy at `public/install.sh` and
+`public/uninstall.sh`; after changing either script here, copy it there and
+deploy the site.
 
-## Step 3: GitHub Actions builds
+The installer follows `github.com/ayandexyz/agent-board/releases/latest` to
+find the tag (no API call, so no rate limit), downloads the platform binary
+and `checksums.txt`, verifies the SHA-256, and installs to `~/.local/bin`.
 
-Pushing the tag triggers `.github/workflows/release.yml` which:
-
-1. Runs on **5 matrix jobs**: linux-amd64, linux-arm64, darwin-amd64, darwin-arm64, android-arm64
-2. Builds `agentboard-{OS}-{ARCH}` for each
-3. Uses `softprops/action-gh-release` to attach all 5 binaries to a new GitHub Draft Release
-
-**Check the run:**
-```bash
-gh run list --workflow=release.yml
-```
-
-Or watch via GitHub UI: https://github.com/ayandexyz/agent-board/actions
-
----
-
-## Step 4: Publish the release
-
-After CI completes:
-
-1. Go to: https://github.com/ayandexyz/agent-board/releases
-2. You should see a **Draft** release with all 5 binaries
-3. Click **Edit** to add release notes — describe what changed
-4. Click **Publish release**
-
-The install script at `https://raw.githubusercontent.com/ayandexyz/agent-board/main/install.sh` will automatically point to `releases/latest/download/agentboard-{OS}-{ARCH}`.
-
----
-
-## How users install
-
-After the release is published, users run:
-
-```bash
-curl -sSL https://agentboard.ayande.xyz/install.sh | bash
-```
-
-The script:
-1. Detects their OS and arch
-2. Installs missing dependencies (tmux, Go, npm, node, git)
-3. Downloads the correct binary from `releases/latest/download/`
-4. Places it in `~/.local/bin/agentboard`
-
-Then:
-```bash
-export PATH="$HOME/.local/bin:$PATH"
-agentboard init
-agentboard
-```
+`agentboard update` does the same from inside the binary: it asks the
+GitHub API for the latest release, refuses to move to an older or equal
+version, verifies the download against `checksums.txt`, and atomically
+renames it over the running executable (following a symlink to its target).
+A release without `checksums.txt` cannot be installed by either path.
 
 ---
 
 ## Platform binaries
 
-| Binary name | OS | Arch |
-|-------------|----|------|
+| Asset | OS | Arch |
+|-------|----|------|
 | `agentboard-linux-x86_64` | Linux | x86_64 |
 | `agentboard-linux-arm64` | Linux | ARM64 |
 | `agentboard-darwin-x86_64` | macOS | Intel |
 | `agentboard-darwin-arm64` | macOS | Apple Silicon |
 | `agentboard-android-arm64` | Android (Termux) | ARM64 |
+| `checksums.txt` | — | SHA-256 of each binary |
+
+These names are a contract between `release.yml`/`Makefile`, `install.sh`,
+`npm/bin/download.js` and `selfupdate.AssetName`. Change them together.
 
 ---
 
 ## Troubleshooting
 
-**Release assets missing?**
-Check the Actions tab for build failures. Common issues: Go version mismatch, out-of-memory on ARM builds.
+**Installer says "no published release found".** The tag's workflow failed
+or has not finished; check the Actions tab.
 
-**Install script returns "Not Found"?**
-The release hasn't been published yet, or the binary names don't match exactly. Binary names must match exactly what the install script expects (see table above).
-
-**tmux not installed?**
-The install script tries to install it automatically. On failure, users must install tmux manually first:
-- Ubuntu/Debian: `sudo apt-get install tmux`
-- macOS: `brew install tmux`
-- Termux: `pkg install tmux`
+**`agentboard update` says the directory is not writable.** The binary was
+installed somewhere root owns (e.g. `/usr/local/bin`). Re-run with `sudo`,
+or reinstall to `~/.local/bin` with the one-liner.

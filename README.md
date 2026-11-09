@@ -44,25 +44,43 @@ For more information about AgentBoard, including feature showcases, screenshots,
 
 ### Prerequisites
 
-- **Go**: 1.21 or higher
-- **git**: For cloning the repository
-- **tmux**: Required for tmux-mode agent spawning (Linux/macOS)
-- **Node.js/npm**: Required for MCP server integrations
+- **tmux**: every agent runs in a tmux window (the installer adds it if missing)
+- **git**: tickets get their own worktree (the installer adds it if missing)
+- **A coding agent** on your PATH: Claude Code, OpenCode or FreeCode
+- **Node.js/npm**: optional, only for the ContextCarry/SessionCarry MCP integrations
+- **Go 1.26+**: only to build from source
 
 ### Installation
 
-#### From Binary (All Platforms)
-
-Run the automated installer:
+#### One-line install (Linux, macOS, Termux)
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/ayandexyz/agent-board/main/install.sh | bash
+curl -fsSL https://agentboard.ayande.xyz/install.sh | bash
 ```
 
-This will detect your OS and architecture, install dependencies, and place the binary in `~/.local/bin`.
+The installer downloads the release binary for your OS and architecture,
+checks it against the release's SHA-256 `checksums.txt`, puts it in
+`~/.local/bin` (Termux: `$PREFIX/bin`), adds that directory to your PATH,
+and installs `tmux` and `git` with your package manager if they are missing.
+Nothing else is needed: the binary is self-contained.
+
+| Variable | Effect |
+|----------|--------|
+| `AGENTBOARD_VERSION=v0.2.0` | Install that tag instead of the latest |
+| `AGENTBOARD_INSTALL_DIR=<dir>` | Install somewhere other than `~/.local/bin` |
+| `AGENTBOARD_NO_DEPS=1` | Do not install tmux/git |
+| `AGENTBOARD_NO_MODIFY_PATH=1` | Do not edit shell rc files |
+
+```bash
+curl -fsSL https://agentboard.ayande.xyz/install.sh | AGENTBOARD_VERSION=v0.2.0 bash
+```
+
+Update in place with `agentboard update`. Uninstall with
+`curl -fsSL https://agentboard.ayande.xyz/uninstall.sh | bash` (add
+`--purge` to also delete your boards in `~/.agentboard`).
 
 #### From Source
-Ensure [Go](https://go.dev/doc/install) 1.21+ is installed.
+Ensure [Go](https://go.dev/doc/install) 1.26+ is installed.
 
 ```bash
 git clone https://github.com/ayandexyz/agent-board.git
@@ -76,33 +94,27 @@ agentboard
 
 `make` on its own lists every target.
 
-#### Platform-Specific Notes
-
-| Platform | Package Manager | Install Command |
-|----------|-----------------|-----------------|
-| Linux (apt) | `apt-get install golang git tmux npm` | Binary or source |
-| macOS (brew) | `brew install go git tmux npm node` | Binary or source |
-| Android (Termux) | `pkg install golang git tmux nodejs` | Binary or source |
-
 ### Basic Usage
 
-Start the interactive Kanban board:
+Open any project and start the board:
 
 ```bash
-./agentboard
-```
-
-Or if installed via binary:
-```bash
+cd your-project
 agentboard
 ```
+
+There is no setup step. The first run writes a default config to
+`~/.agentboard/`, names the board after the repository, and opens it in a
+tmux session of the same name (creating it if you are not already in tmux).
+Agents found on your PATH (Claude Code, OpenCode, FreeCode, …) appear in the
+agent picker.
 
 ### CLI Commands
 
 | Command | Description |
 |---------|-------------|
 | `agentboard` | Launch the Kanban TUI (default) |
-| `agentboard update` | Check for and install the latest release in-place |
+| `agentboard update` | Download the latest release, verify its checksum and replace the running binary |
 | `agentboard -v`, `--version`, `version` | Print the installed version |
 | `agentboard -h`, `--help`, `help` | Show usage and available commands |
 

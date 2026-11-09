@@ -8,64 +8,45 @@ on:
 permissions:
   contents: write
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
-  build:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - goos: linux
-            goarch: amd64
-            artifact_arch: x86_64
-          - goos: linux
-            goarch: arm64
-            artifact_arch: arm64
-          - goos: darwin
-            goarch: amd64
-            artifact_arch: x86_64
-          - goos: darwin
-            goarch: arm64
-            artifact_arch: arm64
-          - goos: android
-            goarch: arm64
-            artifact_arch: arm64
-
+  release:
     runs-on: ubuntu-latest
-
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.26'
+          go-version-file: go.mod
 
-      - name: Build
-        env:
-          GOOS: ${{ matrix.goos }}
-          GOARCH: ${{ matrix.goarch }}
+      - name: Install tmux and git for the tests
         run: |
-          go build -ldflags="-s -w -X github.com/ayandexyz/agent-board/internal/version.Version=${{ github.ref_name }}" -o "agentboard-${GOOS}-${{ matrix.artifact_arch }}" ./cmd/agentboard
+          sudo apt-get update -qq && sudo apt-get install -y -qq tmux git
+          git config --global user.name ci
+          git config --global user.email ci@localhost
 
-      - name: Upload artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: agentboard-${{ matrix.goos }}-${{ matrix.artifact_arch }}
-          path: agentboard-${{ matrix.goos }}-${{ matrix.artifact_arch }}
+      - name: Vet and test
+        run: make check
 
-  release:
-    needs: build
-    runs-on: ubuntu-latest
-    steps:
-      - name: Download all artifacts
-        uses: actions/download-artifact@v4
-        with:
-          path: artifacts
+      - name: Build release binaries
+        run: make dist VERSION=${{ github.ref_name }}
 
-      - name: List artifacts
-        run: ls -la artifacts/
+      - name: Smoke-test the linux binary
+        run: |
+          got="$(./dist/agentboard-linux-x86_64 --version)"
+          echo "$got"
+          [ "$got" = "agentboard ${{ github.ref_name }}" ]
 
-      - name: Create GitHub Release
+      - name: Publish GitHub release
         uses: softprops/action-gh-release@v2
         with:
-          files: artifacts/**
+          files: dist/*
+          generate_release_notes: true
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          make_latest: ${{ !contains(github.ref_name, '-') }}
