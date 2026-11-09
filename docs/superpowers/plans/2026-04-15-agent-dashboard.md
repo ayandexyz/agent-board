@@ -242,9 +242,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ayan-de/agent-board/internal/config"
-	"github.com/ayan-de/agent-board/internal/keybinding"
-	"github.com/ayan-de/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/config"
+	"github.com/ayandexyz/agent-board/internal/keybinding"
+	"github.com/ayandexyz/agent-board/internal/store"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -402,9 +402,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ayan-de/agent-board/internal/config"
-	"github.com/ayan-de/agent-board/internal/keybinding"
-	"github.com/ayan-de/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/config"
+	"github.com/ayandexyz/agent-board/internal/keybinding"
+	"github.com/ayandexyz/agent-board/internal/store"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -703,9 +703,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ayan-de/agent-board/internal/config"
-	"github.com/ayan-de/agent-board/internal/keybinding"
-	"github.com/ayan-de/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/config"
+	"github.com/ayandexyz/agent-board/internal/keybinding"
+	"github.com/ayandexyz/agent-board/internal/store"
 
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"

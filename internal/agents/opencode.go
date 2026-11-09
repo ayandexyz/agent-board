@@ -3,7 +3,7 @@ package agents
 import (
 	"regexp"
 
-	"github.com/ayan-de/agent-board/internal/activity"
+	"github.com/ayandexyz/agent-board/internal/activity"
 )
 
 // openCode has no settings flag, so the board ships its reporter as a plugin

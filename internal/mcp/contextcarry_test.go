@@ -4,7 +4,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ayan-de/agent-board/internal/mcp"
+	"github.com/ayandexyz/agent-board/internal/mcp"
 )
 
 func TestContextCarryAdapterBuildsHandoffPayload(t *testing.T) {

@@ -65,9 +65,9 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/ayan-de/agent-board/internal/config"
-	"github.com/ayan-de/agent-board/internal/keybinding"
-	"github.com/ayan-de/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/config"
+	"github.com/ayandexyz/agent-board/internal/keybinding"
+	"github.com/ayandexyz/agent-board/internal/store"
 )
 
 func newTestKanban(t *testing.T) KanbanModel {
@@ -133,8 +133,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ayan-de/agent-board/internal/keybinding"
-	"github.com/ayan-de/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/keybinding"
+	"github.com/ayandexyz/agent-board/internal/store"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -950,9 +950,9 @@ package tui
 import (
 	"fmt"
 
-	"github.com/ayan-de/agent-board/internal/config"
-	"github.com/ayan-de/agent-board/internal/keybinding"
-	"github.com/ayan-de/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/config"
+	"github.com/ayandexyz/agent-board/internal/keybinding"
+	"github.com/ayandexyz/agent-board/internal/store"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -1098,9 +1098,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/ayan-de/agent-board/internal/config"
-	"github.com/ayan-de/agent-board/internal/keybinding"
-	"github.com/ayan-de/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/config"
+	"github.com/ayandexyz/agent-board/internal/keybinding"
+	"github.com/ayandexyz/agent-board/internal/store"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -1119,8 +1119,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ayan-de/agent-board/internal/config"
-	"github.com/ayan-de/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/config"
+	"github.com/ayandexyz/agent-board/internal/store"
 
 	tea "github.com/charmbracelet/bubbletea"
 )

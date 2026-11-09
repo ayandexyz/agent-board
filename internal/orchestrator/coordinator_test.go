@@ -4,9 +4,9 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ayan-de/agent-board/internal/llm"
-	"github.com/ayan-de/agent-board/internal/orchestrator"
-	"github.com/ayan-de/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/llm"
+	"github.com/ayandexyz/agent-board/internal/orchestrator"
+	"github.com/ayandexyz/agent-board/internal/store"
 )
 
 func TestCreateProposalUsesTicketAndContextCarry(t *testing.T) {

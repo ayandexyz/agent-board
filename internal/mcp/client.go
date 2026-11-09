@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/ayan-de/agent-board/internal/config"
-	"github.com/ayan-de/agent-board/internal/mcpclient"
+	"github.com/ayandexyz/agent-board/internal/config"
+	"github.com/ayandexyz/agent-board/internal/mcpclient"
 )
 
 // Manager manages MCP server connections.

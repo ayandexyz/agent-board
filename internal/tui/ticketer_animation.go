@@ -7,8 +7,8 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/ayan-de/agent-board/internal/config"
-	"github.com/ayan-de/agent-board/internal/theme"
+	"github.com/ayandexyz/agent-board/internal/config"
+	"github.com/ayandexyz/agent-board/internal/theme"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 )

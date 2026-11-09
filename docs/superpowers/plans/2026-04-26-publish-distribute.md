@@ -641,13 +641,13 @@ Replace the existing Installation section with:
 ### One-Line Install (Linux/macOS/Termux)
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/ayan-de/agent-board/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/ayandexyz/agent-board/main/scripts/install.sh | bash
 ```
 
 ### Manual Install
 
 ```bash
-git clone https://github.com/ayan-de/agent-board.git
+git clone https://github.com/ayandexyz/agent-board.git
 cd agent-board
 make install-local   # installs to ~/.local/bin/agentboard
 ```
@@ -662,7 +662,7 @@ The install script will:
 ### Windows
 
 ```powershell
-irm https://raw.githubusercontent.com/ayan-de/agent-board/main/scripts/install.ps1 | iex
+irm https://raw.githubusercontent.com/ayandexyz/agent-board/main/scripts/install.ps1 | iex
 ```
 
 ---

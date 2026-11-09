@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ayan-de/agent-board/internal/activity"
-	"github.com/ayan-de/agent-board/internal/api"
-	"github.com/ayan-de/agent-board/internal/apitypes"
-	"github.com/ayan-de/agent-board/internal/orchestrator"
-	"github.com/ayan-de/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/activity"
+	"github.com/ayandexyz/agent-board/internal/api"
+	"github.com/ayandexyz/agent-board/internal/apitypes"
+	"github.com/ayandexyz/agent-board/internal/orchestrator"
+	"github.com/ayandexyz/agent-board/internal/store"
 )
 
 type fakeBoard struct {

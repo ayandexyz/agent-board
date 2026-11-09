@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"os/exec"
 
-	"github.com/ayan-de/agent-board/internal/agents"
+	"github.com/ayandexyz/agent-board/internal/agents"
 )
 
 type DetectedAgent struct {

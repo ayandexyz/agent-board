@@ -4,8 +4,8 @@ import (
 	"io"
 	"os"
 
-	"github.com/ayan-de/agent-board/internal/cli"
-	"github.com/ayan-de/agent-board/internal/version"
+	"github.com/ayandexyz/agent-board/internal/cli"
+	"github.com/ayandexyz/agent-board/internal/version"
 )
 
 func main() {

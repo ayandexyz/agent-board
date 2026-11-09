@@ -107,7 +107,7 @@ Add fields to `TicketViewModel` (after `editBuffer string` at line 55):
 	agentCursor int
 ```
 
-Add import for `"github.com/ayan-de/agent-board/internal/config"` to the import block.
+Add import for `"github.com/ayandexyz/agent-board/internal/config"` to the import block.
 
 - [ ] **Step 2: Update constructor to accept agents**
 
@@ -233,7 +233,7 @@ In `internal/tui/ticketview_test.go` line 37, update `newTestTicketView` to pass
 	m := NewTicketViewModel(s, resolver, defaultTheme, testAgents)
 ```
 
-Add `"github.com/ayan-de/agent-board/internal/config"` to test file imports.
+Add `"github.com/ayandexyz/agent-board/internal/config"` to test file imports.
 
 - [ ] **Step 8: Run existing tests**
 
@@ -558,7 +558,7 @@ Expected: FAIL — no `●` in view
 
 - [ ] **Step 3: Add agent dot rendering to kanban**
 
-In `internal/tui/kanban.go`, add import for `"github.com/ayan-de/agent-board/internal/config"`.
+In `internal/tui/kanban.go`, add import for `"github.com/ayandexyz/agent-board/internal/config"`.
 
 In the `View()` method, change line 228 from:
 

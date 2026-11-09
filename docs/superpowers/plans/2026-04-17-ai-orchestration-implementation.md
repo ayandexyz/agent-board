@@ -88,8 +88,8 @@ package llm_test
 import (
 	"testing"
 
-	"github.com/ayan-de/agent-board/internal/config"
-	"github.com/ayan-de/agent-board/internal/llm"
+	"github.com/ayandexyz/agent-board/internal/config"
+	"github.com/ayandexyz/agent-board/internal/llm"
 )
 
 func TestFactoryReturnsClient(t *testing.T) {
@@ -177,7 +177,7 @@ package llm
 import (
 	"fmt"
 
-	"github.com/ayan-de/agent-board/internal/config"
+	"github.com/ayandexyz/agent-board/internal/config"
 	"github.com/tmc/langchaingo/llms/openai"
 )
 
@@ -723,7 +723,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ayan-de/agent-board/internal/orchestrator"
+	"github.com/ayandexyz/agent-board/internal/orchestrator"
 )
 
 func TestServiceCreateProposalRequiresAssignedAgent(t *testing.T) {
@@ -752,8 +752,8 @@ package orchestrator
 import (
 	"context"
 
-	"github.com/ayan-de/agent-board/internal/llm"
-	"github.com/ayan-de/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/llm"
+	"github.com/ayandexyz/agent-board/internal/store"
 )
 
 type CreateProposalInput struct {
@@ -841,7 +841,7 @@ func (s Service) CreateProposal(ctx context.Context, input CreateProposalInput) 
 }
 ```
 
-Note: This imports `store` directly in the return type. The full import of `"github.com/ayan-de/agent-board/internal/store"` is needed in `service.go`.
+Note: This imports `store` directly in the return type. The full import of `"github.com/ayandexyz/agent-board/internal/store"` is needed in `service.go`.
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -870,7 +870,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ayan-de/agent-board/internal/llm"
+	"github.com/ayandexyz/agent-board/internal/llm"
 )
 
 type fakeModel struct {
@@ -999,9 +999,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ayan-de/agent-board/internal/llm"
-	"github.com/ayan-de/agent-board/internal/orchestrator"
-	"github.com/ayan-de/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/llm"
+	"github.com/ayandexyz/agent-board/internal/orchestrator"
+	"github.com/ayandexyz/agent-board/internal/store"
 )
 
 type fakeStore struct {
@@ -1440,7 +1440,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/ayan-de/agent-board/internal/orchestrator"
+	"github.com/ayandexyz/agent-board/internal/orchestrator"
 )
 
 type fakeCmdRunner struct {
@@ -1605,8 +1605,8 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/ayan-de/agent-board/internal/llm"
-	"github.com/ayan-de/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/llm"
+	"github.com/ayandexyz/agent-board/internal/store"
 )
 
 func (s Service) FinishRun(ctx context.Context, input FinishRunInput) error {
@@ -1671,7 +1671,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/ayan-de/agent-board/internal/mcp"
+	"github.com/ayandexyz/agent-board/internal/mcp"
 )
 
 func TestContextCarryAdapterBuildsHandoffPayload(t *testing.T) {

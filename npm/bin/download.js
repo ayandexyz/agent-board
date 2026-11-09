@@ -4,7 +4,7 @@ const path = require('path');
 const https = require('https');
 const http = require('http');
 
-const REPO = 'ayan-de/agent-board';
+const REPO = 'ayandexyz/agent-board';
 const BASE_URL = `https://github.com/${REPO}/releases/latest/download`;
 const INSTALL_DIR = path.join(process.env.HOME, '.local', 'bin');
 

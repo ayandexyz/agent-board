@@ -7,9 +7,9 @@ import (
 	"os"
 	"runtime"
 
-	"github.com/ayan-de/agent-board/internal/cli"
-	"github.com/ayan-de/agent-board/internal/selfupdate"
-	"github.com/ayan-de/agent-board/internal/version"
+	"github.com/ayandexyz/agent-board/internal/cli"
+	"github.com/ayandexyz/agent-board/internal/selfupdate"
+	"github.com/ayandexyz/agent-board/internal/version"
 )
 
 func updateCommand() cli.Command {

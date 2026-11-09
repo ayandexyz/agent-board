@@ -8,7 +8,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/ayan-de/agent-board/internal/apitypes"
+	"github.com/ayandexyz/agent-board/internal/apitypes"
 )
 
 // eventBuffer is how many past events a reconnecting client can still

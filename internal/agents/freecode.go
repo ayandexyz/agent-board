@@ -3,7 +3,7 @@ package agents
 import (
 	"regexp"
 
-	"github.com/ayan-de/agent-board/internal/activity"
+	"github.com/ayandexyz/agent-board/internal/activity"
 )
 
 // freeCode posts Claude-Code-shaped payloads from its own built-in board

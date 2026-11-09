@@ -6,8 +6,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/ayan-de/agent-board/internal/agents"
-	"github.com/ayan-de/agent-board/internal/pty"
+	"github.com/ayandexyz/agent-board/internal/agents"
+	"github.com/ayandexyz/agent-board/internal/pty"
 )
 
 func ExtractResumeCommand(output string) string {

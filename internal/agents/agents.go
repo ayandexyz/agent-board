@@ -11,7 +11,7 @@ import (
 	"fmt"
 	"regexp"
 
-	"github.com/ayan-de/agent-board/internal/activity"
+	"github.com/ayandexyz/agent-board/internal/activity"
 )
 
 // Capability is one thing the board may ask of an agent. Only capabilities the

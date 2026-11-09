@@ -6,7 +6,7 @@ This document covers how to ship a new version of AgentBoard.
 
 ## Prerequisites
 
-- GitHub repo: `ayan-de/agent-board`
+- GitHub repo: `ayandexyz/agent-board`
 - GitHub CLI (`gh`) authenticated: `gh auth login`
 - Docker (for cross-platform builds — darwin builds must happen on macOS runners; for now we'll use GitHub Actions which handles all platforms)
 
@@ -56,7 +56,7 @@ Pushing the tag triggers `.github/workflows/release.yml` which:
 gh run list --workflow=release.yml
 ```
 
-Or watch via GitHub UI: https://github.com/ayan-de/agent-board/actions
+Or watch via GitHub UI: https://github.com/ayandexyz/agent-board/actions
 
 ---
 
@@ -64,12 +64,12 @@ Or watch via GitHub UI: https://github.com/ayan-de/agent-board/actions
 
 After CI completes:
 
-1. Go to: https://github.com/ayan-de/agent-board/releases
+1. Go to: https://github.com/ayandexyz/agent-board/releases
 2. You should see a **Draft** release with all 5 binaries
 3. Click **Edit** to add release notes — describe what changed
 4. Click **Publish release**
 
-The install script at `https://raw.githubusercontent.com/ayan-de/agent-board/main/install.sh` will automatically point to `releases/latest/download/agentboard-{OS}-{ARCH}`.
+The install script at `https://raw.githubusercontent.com/ayandexyz/agent-board/main/install.sh` will automatically point to `releases/latest/download/agentboard-{OS}-{ARCH}`.
 
 ---
 

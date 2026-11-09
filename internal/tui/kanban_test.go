@@ -8,10 +8,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/ayan-de/agent-board/internal/config"
-	"github.com/ayan-de/agent-board/internal/keybinding"
-	"github.com/ayan-de/agent-board/internal/store"
-	"github.com/ayan-de/agent-board/internal/theme"
+	"github.com/ayandexyz/agent-board/internal/config"
+	"github.com/ayandexyz/agent-board/internal/keybinding"
+	"github.com/ayandexyz/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/theme"
 
 	tea "github.com/charmbracelet/bubbletea"
 
