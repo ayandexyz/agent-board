@@ -10,18 +10,16 @@ type pending struct {
 }
 
 // DecisionCodec renders a permission decision in the reply shape its agent
-// reads. Agents disagree here — Claude Code wants the decision nested under a
-// behavior key, FreeCode wants a bare string — so the shape travels with the
-// launch rather than being switched on an agent name in here.
+// reads. The shape travels with the launch rather than being switched on an
+// agent name in here, so an agent that reads a different shape needs only a
+// codec of its own.
 type DecisionCodec func(decision string) any
 
-// NestedDecision is Claude Code's shape: {"decision":{"behavior":"allow"}}.
+// NestedDecision is Claude Code's shape, which FreeCode reads too:
+// {"decision":{"behavior":"allow"}}.
 func NestedDecision(decision string) any {
 	return claudeDecision{Behavior: decision}
 }
-
-// BareDecision is FreeCode's shape: {"decision":"allow"}.
-func BareDecision(decision string) any { return decision }
 
 // Resolve answers a session's held permission request. decision is "allow",
 // "deny", or "" to hand the choice back to the agent's own pane picker. It

@@ -37,7 +37,7 @@ func TestRegisterRejectsContradictions(t *testing.T) {
 		{"claims remote decisions but supplies no codec", Descriptor{
 			Name: "x", Binary: "x", Capabilities: []Capability{CapPermissionRemote}}},
 		{"supplies a codec it never claimed", Descriptor{
-			Name: "x", Binary: "x", Decisions: activity.BareDecision}},
+			Name: "x", Binary: "x", Decisions: activity.NestedDecision}},
 		{"provisions reporting it never claimed", Descriptor{
 			Name: "x", Binary: "x", Provision: func(Provision) (Launch, error) { return Launch{}, nil }}},
 	}
@@ -116,8 +116,11 @@ func TestProvisionWiresEachAgentToTheReceiver(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := "FREECODE_HOOK_URL=" + p.HookURL(); len(got.Env) != 1 || got.Env[0] != want {
-		t.Errorf("freecode env = %v, want [%s]", got.Env, want)
+	if len(got.Env) != 0 {
+		t.Errorf("freecode exported env it does not read: %v", got.Env)
+	}
+	if !strings.Contains(got.Settings, p.HookURL()) {
+		t.Errorf("freecode settings do not point at %s", p.HookURL())
 	}
 
 	open, _ := Lookup("opencode")

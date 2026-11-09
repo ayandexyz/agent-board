@@ -273,7 +273,7 @@ Spawned agents report their own state over HTTP rather than the board guessing f
 
 `internal/activity` is the receiver: a loopback `net/http` server on `127.0.0.1:0`, started in `runTUI` and handed to the orchestrator via `SetHookBaseURL`. It accepts `POST /hooks/{sessionID}` carrying Claude-Code-shaped hook JSON, maps it to a state (`active`, `idle`, `waiting_input`, `blocked`, `exited`), and fires one `notify-send` on entry into the needs-input family. The alert body is `toolDetail` in `internal/activity/detail.go`: the question for `AskUserQuestion`, the command for `Bash`, the path for a file edit, and the bare tool name for anything unlisted — never a dump of `tool_input`. A permission request naming `AskUserQuestion` is `waiting_input`, not `blocked`; what is waiting is an answer, not an approval. It is also never held open or marked `Decidable` — allowing it would only let the agent ask, and the answer is typed in the pane regardless — so Claude Code's questions raise the same in-app notification OpenCode's and FreeCode's do, rather than an approve/deny modal that would answer nothing. `X-Agentboard-Launch` is checked against the launch id recorded at spawn, so a relaunched session's late hooks are dropped.
 
-`PermissionRequest` is held open (10 minutes by default, `Receiver.PermissionTimeout`) while the board asks: the alert is flagged `Decidable`, the TUI raises an approval modal instead of a toast, and `Receiver.Resolve(sessionID, decision)` writes the reply — nested `{"behavior":...}` for Claude Code and OpenCode, a bare string for FreeCode, through the `activity.DecisionCodec` recorded at `Launch`. Cancelling the modal denies; a timeout answers `{}` and the pane picker takes over. The receiver never names an agent: a nil codec simply means nobody can be answered over the wire.
+`PermissionRequest` is held open (10 minutes by default, `Receiver.PermissionTimeout`) while the board asks: the alert is flagged `Decidable`, the TUI raises an approval modal instead of a toast, and `Receiver.Resolve(sessionID, decision)` writes the reply — nested `{"behavior":...}`, which every agent reads today, through the `activity.DecisionCodec` recorded at `Launch`. Cancelling the modal denies; a timeout answers `{}` and the pane picker takes over. The receiver never names an agent: a nil codec simply means nobody can be answered over the wire.
 
 ### The agent catalog
 
@@ -317,11 +317,11 @@ Every agent pane is launched with its session identity exported via `tmux new-wi
 | `AGENTBOARD_SESSION_ID` | The session this pane belongs to |
 | `AGENTBOARD_LAUNCH_ID` | Per-spawn id; lets the board drop hooks from an earlier launch of the same session |
 | `AGENTBOARD_HOOK_URL` | Base URL of the board's local hook receiver |
-| `FREECODE_HOOK_URL` | FreeCode only: `<base>/hooks/<sessionID>` |
 | `OPENCODE_CONFIG` | OpenCode only: path to the config document that loads the board's reporting plugin |
 
-Claude Code takes no environment variable of its own. It is launched as
-`claude --settings ~/.agentboard/cache/settings-<sessionID>.json`, whose
+Claude Code and FreeCode take no environment variable of their own. Each is
+launched with `--settings ~/.agentboard/cache/settings-<sessionID>.json`
+(`claude --settings …`, `freecode --settings …`), whose
 contents are built by `activity.ClaudeSettingsJSON`,
 registering an `http` hook at `<base>/hooks/<sessionID>` for `SessionStart`,
 `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `PermissionRequest`,
@@ -333,14 +333,12 @@ kilobyte of JSON typed into the pane buries the launch line in the user's
 scrollback. It stays out of the ticket worktree either way.
 
 Hooks block the turn, so lifecycle reports time out after 5 s; only
-`PermissionRequest` waits (600 s), since that one is a human decision. Note the
-two agents disagree on the reply shape: Claude Code wants
-`decision: {"behavior": "allow"}` nested, FreeCode wants a bare
-`decision: "allow"`. `PermissionRequest` from Claude Code carries no
-`tool_use_id`.
+`PermissionRequest` waits (600 s), since that one is a human decision. The
+reply nests the decision: `decision: {"behavior": "allow"}`.
+`PermissionRequest` from Claude Code carries no `tool_use_id`; FreeCode's does.
 
 The document reaches the pane through `RunRequest.Settings`, built by the
-agent's `Provision` in `internal/agents/claude.go`; `launchArgs` in
+agent's `Provision` (`internal/agents/claude.go`, `freecode.go`); `launchArgs` in
 `internal/orchestrator/pty_runner.go` caches it and `agentCommand` quotes the
 path into the launch line.
 
@@ -374,7 +372,20 @@ OpenCode, so a test can feed it one event and watch what reaches the receiver.
 Note the `question` tool is gated behind `OPENCODE_ENABLE_QUESTION_TOOL` and is
 not offered in headless `opencode run`.
 
-FreeCode support lives in the FreeCode repo at `apps/core/src/hooks/builtin/board-webhook.ts`, registered from `initHooks`. It posts Claude Code shaped hook payloads (`SessionStart`, `UserPromptSubmit`, `PreToolUse`, `PostToolUse`, `Stop`) so the board needs no FreeCode-specific mapper, and it answers permission requests remotely: a reply of `{"hookSpecificOutput":{"decision":"allow"}}` resolves the agent's pending prompt as a one-shot grant, `deny` rejects it, and no decision leaves the choice to the pane picker.
+FreeCode has no code for the board, the same as Claude Code. Its generic hook
+system does what Claude Code's does: a per-process settings scope
+(`--settings`, carried as `FREECODE_SETTINGS`), `http` hooks with
+`allowedEnvVars` header interpolation, the event document on stdin or as the
+request body with Claude Code's field names, and Claude Code's reply shapes.
+So the board hands it the same `ClaudeSettingsJSON` document and
+`NestedDecision` codec. FreeCode's own additions: its tools are lowercase
+(`bash`, `edit`) with camelCase arguments (`filePath`, which `toolDetail`
+reads), and its `question` tool raises a `Notification` with
+`notification_type: "question"` whose `message` is the question — the board
+maps that to `waiting_input` and quotes the message. `SessionEnd` reports
+`clear` when another session takes over the process and `other` when FreeCode
+exits. A FreeCode build older than this contract rejects `--settings` as an
+unknown argument and will not start from the board.
 
 See `docs/superpowers/specs/2026-09-08-agent-activity-tracking-design.md` and `docs/superpowers/plans/2026-09-08-agent-activity-tracking.md`.
 
@@ -578,7 +589,6 @@ Backlog -> In Progress            -> Review              -> Done
 | `AGENTBOARD_SESSION_ID` | set by board | Exported into each agent pane; the session the pane belongs to |
 | `AGENTBOARD_LAUNCH_ID` | set by board | Exported into each agent pane; per-spawn generation id |
 | `AGENTBOARD_HOOK_URL` | set by board | Exported into each agent pane; base URL of the hook receiver |
-| `FREECODE_HOOK_URL` | set by board | Exported for freecode agents; per-session hook endpoint |
 | `OPENCODE_CONFIG` | set by board | Exported for opencode agents; config that loads the board's reporting plugin |
 | `AGENTBOARD_NPM_PATH` | `npm` | Path to npm binary (for MCP servers) |
 | `AGENTBOARD_NODE_PATH` | `node` | Path to node binary (for MCP servers) |

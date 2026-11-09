@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -169,12 +170,9 @@ func TestStartAdHocRunExportsSessionEnv(t *testing.T) {
 	if got, _ := envValue(cr.last.Env, "AGENTBOARD_HOOK_URL"); got != "http://127.0.0.1:9999" {
 		t.Errorf("AGENTBOARD_HOOK_URL = %q", got)
 	}
-	if _, ok := envValue(cr.last.Env, "FREECODE_HOOK_URL"); ok {
-		t.Error("non-freecode agent should not get FREECODE_HOOK_URL")
-	}
 }
 
-func TestStartAdHocRunFreecodeGetsHookURL(t *testing.T) {
+func TestStartAdHocRunFreecodeGetsHookSettings(t *testing.T) {
 	fs := &fakeStore{ticket: store.Ticket{ID: "AGT-01"}}
 	cr := &capturingRunner{}
 	svc := orchestrator.NewService(fs, nil, nil, nil)
@@ -187,8 +185,11 @@ func TestStartAdHocRunFreecodeGetsHookURL(t *testing.T) {
 	}
 
 	want := "http://127.0.0.1:9999/hooks/" + sess.ID
-	if got, _ := envValue(cr.last.Env, "FREECODE_HOOK_URL"); got != want {
-		t.Errorf("FREECODE_HOOK_URL = %q, want %q", got, want)
+	if !strings.Contains(cr.last.Settings, want) {
+		t.Errorf("settings do not point at %s: %s", want, cr.last.Settings)
+	}
+	if !strings.Contains(cr.last.Settings, `"PermissionRequest"`) {
+		t.Errorf("settings register no PermissionRequest hook: %s", cr.last.Settings)
 	}
 }
 
@@ -231,8 +232,8 @@ func TestStartAdHocRunNotifiesLaunchWithTheAgentsDecisionCodec(t *testing.T) {
 	if codec == nil {
 		t.Fatal("freecode launched with no decision codec")
 	}
-	if got := codec("allow"); got != "allow" {
-		t.Errorf("freecode codec produced %#v, want the bare string", got)
+	if got, want := codec("allow"), activity.NestedDecision("allow"); !reflect.DeepEqual(got, want) {
+		t.Errorf("freecode codec produced %#v, want Claude Code's nested %#v", got, want)
 	}
 }
 
@@ -245,10 +246,11 @@ func TestStartAdHocRunWithoutHookURLExportsNoHookEnv(t *testing.T) {
 	if _, err := svc.StartAdHocRun(context.Background(), "AGT-01", "freecode", "do it"); err != nil {
 		t.Fatalf("StartAdHocRun() error = %v", err)
 	}
-	for _, key := range []string{"AGENTBOARD_HOOK_URL", "FREECODE_HOOK_URL"} {
-		if _, ok := envValue(cr.last.Env, key); ok {
-			t.Errorf("%s exported with no hook receiver configured", key)
-		}
+	if _, ok := envValue(cr.last.Env, "AGENTBOARD_HOOK_URL"); ok {
+		t.Error("AGENTBOARD_HOOK_URL exported with no hook receiver configured")
+	}
+	if cr.last.Settings != "" {
+		t.Errorf("Settings = %s, want none with no receiver running", cr.last.Settings)
 	}
 	if _, ok := envValue(cr.last.Env, "AGENTBOARD_SESSION_ID"); !ok {
 		t.Error("AGENTBOARD_SESSION_ID should always be exported")
@@ -297,11 +299,11 @@ func TestStartAdHocRunLeavesOtherAgentsUnflagged(t *testing.T) {
 	svc.SetAgentRunner(cr)
 	svc.SetHookBaseURL("http://127.0.0.1:9999")
 
-	if _, err := svc.StartAdHocRun(context.Background(), "AGT-01", "freecode", "do it"); err != nil {
+	if _, err := svc.StartAdHocRun(context.Background(), "AGT-01", "opencode", "do it"); err != nil {
 		t.Fatalf("StartAdHocRun() error = %v", err)
 	}
 	if cr.last.Settings != "" {
-		t.Errorf("Settings = %s, want none for a non-claude agent", cr.last.Settings)
+		t.Errorf("Settings = %s, want none for an agent configured through its environment", cr.last.Settings)
 	}
 }
 

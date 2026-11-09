@@ -66,10 +66,7 @@ func TestPermissionTimesOutWithNoDecision(t *testing.T) {
 	}
 }
 
-func TestPermissionReplyShapePerAgent(t *testing.T) {
-	if got := string(permissionReply(BareDecision, "deny")); got != `{"hookSpecificOutput":{"decision":"deny","hookEventName":"PermissionRequest"}}` {
-		t.Fatalf("bare reply = %s", got)
-	}
+func TestPermissionReplyShape(t *testing.T) {
 	if got := string(permissionReply(NestedDecision, "allow")); got != `{"hookSpecificOutput":{"decision":{"behavior":"allow"},"hookEventName":"PermissionRequest"}}` {
 		t.Fatalf("nested reply = %s", got)
 	}
