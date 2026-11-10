@@ -3,9 +3,7 @@ package config
 import (
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
-	"strings"
 )
 
 type Config struct {
@@ -21,13 +19,19 @@ type Config struct {
 	ConfigPath        string
 	ProjectConfigPath string
 	ProjectName       string
+	ProjectKey        string
 }
 
-func LoadFromDir(baseDir, projectName string) (*Config, error) {
-	cfg := SetDefaults()
-	cfg.ProjectName = projectName
+func (c *Config) Project() Project {
+	return Project{Key: c.ProjectKey, Name: c.ProjectName}
+}
 
-	if err := EnsureDirs(baseDir, projectName); err != nil {
+func LoadFromDir(baseDir string, project Project) (*Config, error) {
+	cfg := SetDefaults()
+	cfg.ProjectName = project.Name
+	cfg.ProjectKey = project.Key
+
+	if err := EnsureDirs(baseDir, project.Key); err != nil {
 		return nil, err
 	}
 
@@ -37,18 +41,18 @@ func LoadFromDir(baseDir, projectName string) (*Config, error) {
 		return nil, err
 	}
 
-	projPath := filepath.Join(baseDir, "projects", projectName, "config.toml")
+	projPath := filepath.Join(baseDir, "projects", project.Key, "config.toml")
 	_ = WriteDefaultConfig(projPath)
 	if err := loadFromFile(cfg, projPath); err != nil {
 		return nil, err
 	}
 
 	if cfg.DB.Path == "" {
-		cfg.DB.Path = filepath.Join(baseDir, "projects", projectName, "board.db")
+		cfg.DB.Path = filepath.Join(baseDir, "projects", project.Key, "board.db")
 	}
 
 	if cfg.Board.Prefix == "" {
-		cfg.Board.Prefix = DefaultPrefix(projectName)
+		cfg.Board.Prefix = DefaultPrefix(project.Name)
 	}
 
 	cfg.ConfigPath = globalPath
@@ -67,20 +71,12 @@ func Load() (*Config, error) {
 
 	baseDir := filepath.Join(homeDir, ".agentboard")
 
-	remote := getGitRemote()
-	fallback := filepath.Base(getWorkingDir())
-	projectName := ExtractProjectName(remote, fallback)
-
-	return LoadFromDir(baseDir, projectName)
-}
-
-func getGitRemote() string {
-	cmd := exec.Command("git", "remote", "get-url", "origin")
-	out, err := cmd.Output()
-	if err != nil {
-		return ""
+	project := ResolveProject(ExecGit, getWorkingDir())
+	if err := MigrateLegacyProject(baseDir, project); err != nil {
+		return nil, fmt.Errorf("config.load: %w", err)
 	}
-	return strings.TrimSpace(string(out))
+
+	return LoadFromDir(baseDir, project)
 }
 
 func getWorkingDir() string {

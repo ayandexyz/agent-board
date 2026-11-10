@@ -980,7 +980,7 @@ func (a *App) handleKey(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.waiting.Open(a.waitingItems())
 		return a, nil
 	case keybinding.ActionRefresh:
-		newCfg, err := config.LoadFromDir(config.GetBaseDir(), a.config.ProjectName)
+		newCfg, err := config.LoadFromDir(config.GetBaseDir(), a.config.Project())
 		if err == nil {
 			a.config = newCfg
 			a.orchestrator.SetTicketPrefix(newCfg.Board.Prefix)

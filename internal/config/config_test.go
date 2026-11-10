@@ -370,7 +370,7 @@ theme = "dracula"
 	t.Setenv("AGENTBOARD_LLM_API_KEY", "sk-from-env")
 	t.Setenv("AGENTBOARD_LOG", "error")
 
-	cfg, err := LoadFromDir(baseDir, projectName)
+	cfg, err := LoadFromDir(baseDir, Project{Key: projectName, Name: projectName})
 	if err != nil {
 		t.Fatalf("LoadFromDir: %v", err)
 	}
@@ -409,7 +409,7 @@ theme = "dracula"
 func TestLoadFromDirNoConfigsExist(t *testing.T) {
 	baseDir := t.TempDir()
 
-	cfg, err := LoadFromDir(baseDir, "new-project")
+	cfg, err := LoadFromDir(baseDir, Project{Key: "new-project", Name: "new-project"})
 	if err != nil {
 		t.Fatalf("LoadFromDir: %v", err)
 	}
@@ -442,7 +442,7 @@ prefix = "CUSTOM-"
 		t.Fatalf("write project config: %v", err)
 	}
 
-	cfg, err := LoadFromDir(baseDir, projectName)
+	cfg, err := LoadFromDir(baseDir, Project{Key: projectName, Name: projectName})
 	if err != nil {
 		t.Fatalf("LoadFromDir: %v", err)
 	}
@@ -471,7 +471,7 @@ prev_column = "H"
 `
 	os.WriteFile(filepath.Join(projectDir, "config.toml"), []byte(tomlContent), 0644)
 
-	cfg, err := LoadFromDir(dir, "test-project")
+	cfg, err := LoadFromDir(dir, Project{Key: "test-project", Name: "test-project"})
 	if err != nil {
 		t.Fatalf("LoadFromDir: %v", err)
 	}
@@ -513,7 +513,7 @@ require_approval = true
 		t.Fatal(err)
 	}
 
-	cfg, err := LoadFromDir(baseDir, "agent-board")
+	cfg, err := LoadFromDir(baseDir, Project{Key: "agent-board", Name: "agent-board"})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -545,9 +545,4 @@ func TestApplyEnvVarsCoordinatorModel(t *testing.T) {
 	if cfg.LLM.SummarizerModel != "gpt-4o-mini" {
 		t.Errorf("SummarizerModel = %q, want gpt-4o-mini", cfg.LLM.SummarizerModel)
 	}
-}
-
-func TestGetGitRemote(t *testing.T) {
-	remote := getGitRemote()
-	_ = remote
 }

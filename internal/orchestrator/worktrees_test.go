@@ -172,6 +172,33 @@ func TestEnsureReusesRegisteredWorktree(t *testing.T) {
 	}
 }
 
+func TestEnsureReusesRecordedWorktreeOutsideRoot(t *testing.T) {
+	root := t.TempDir()
+	recorded := "/old-root/AGT-04"
+	s := &gitScript{}
+	s.respond = func(c gitCall) (string, error) {
+		if c.args[0] == "worktree" && c.args[1] == "list" {
+			return "worktree /repo\n\nworktree " + recorded, nil
+		}
+		return "", nil
+	}
+	m := newTestManager(s, root)
+
+	info, err := m.Ensure(context.Background(), store.Ticket{ID: "AGT-04", WorktreePath: recorded})
+	if err != nil {
+		t.Fatalf("Ensure: %v", err)
+	}
+	if info.Path != recorded {
+		t.Errorf("Path = %q, want recorded %q", info.Path, recorded)
+	}
+	if info.Created {
+		t.Error("Created should be false for recorded worktree")
+	}
+	if _, ok := s.findCall("worktree", "add"); ok {
+		t.Error("worktree add should not be called for recorded worktree")
+	}
+}
+
 func TestRemoveRefusesDirtyWorktree(t *testing.T) {
 	s := &gitScript{respond: func(c gitCall) (string, error) {
 		if c.args[0] == "status" {

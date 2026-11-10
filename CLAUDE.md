@@ -201,9 +201,37 @@ decision    TEXT  (allow | deny | pane | timeout | dropped | abandoned)
 
 ---
 
+## Project Identity
+
+Every board lives under `~/.agentboard/projects/<key>/` (`config.toml`,
+`board.db`); worktrees under `~/.agentboard/worktrees/<key>/`; the tmux
+session is named `<key>`. `config.ResolveProject` picks the key, first match
+wins:
+
+1. **Pinned** — `git config --local agentboard.project`. Written on first
+   resolution, so the key survives moving or renaming the checkout, and every
+   linked worktree shares it (local config lives in the common dir). Set it by
+   hand to point two checkouts at one board.
+2. **Remote** — owner and repo of `origin`: `ayandexyz-agent-board`, so
+   `alice/api` and `bob/api` never share a board.
+3. **Main repo root** — `<name>-<8 hex of path>`, from
+   `rev-parse --git-common-dir`, so a subdirectory or worktree resolves to the
+   repository it belongs to.
+4. **Outside git** — the same name-plus-hash of the working directory. Not
+   pinnable: moving the folder starts a new board.
+
+`ProjectName` (the repo name, `agent-board`) is the display name and the
+source of `DefaultPrefix`; only `ProjectKey` names directories.
+`MigrateLegacyProject` renames a pre-key `projects/<repo-name>/` to the new key
+once, and never over an existing one. Old worktrees stay where they are:
+`WorktreeManager.Ensure` reuses the ticket's recorded `worktree_path` before
+deriving one from the root.
+
+---
+
 ## tmux Session Layout
 
-AgentBoard creates a tmux session named `{project-name}` when run outside of tmux ([main.go:28-40](cmd/agentboard/main.go#L28-L40)).
+AgentBoard creates a tmux session named `{project-key}` when run outside of tmux ([main.go:28-40](cmd/agentboard/main.go#L28-L40)).
 
 ```
 ┌──────────────────────────────────────────────────────────┐
@@ -497,7 +525,7 @@ Backlog -> In Progress            -> Review              -> Done
            created, agent cwd        (modal in TUI)        branch deleted
 ```
 
-- **Spawn** (`orchestrator.Service.prepareWorkDir`): `git worktree add ~/.agentboard/worktrees/<project>/<ticket-id> -b agent/<ticket-id> <base>` (branch from `ticket.Branch` if set), tmux window opens with `-c <worktree>`. Path persisted in `tickets.worktree_path`; `worktree.created` event recorded.
+- **Spawn** (`orchestrator.Service.prepareWorkDir`): `git worktree add ~/.agentboard/worktrees/<key>/<ticket-id> -b agent/<ticket-id> <base>` (branch from `ticket.Branch` if set), tmux window opens with `-c <worktree>`. Path persisted in `tickets.worktree_path`; `worktree.created` event recorded.
 - **Review -> Done is not gated**: `Service.MoveTicketStatus` is a plain status change for every transition, so a ticket can be moved to done with its worktree and branch left in place. Merging is explicit: `m` on a review ticket calls `Service.CompleteTicket`, which returns a typed `*MergeRequiredError` when unmerged work exists (the TUI turns that into the merge confirm modal; press `s` in the modal to switch strategy for this merge), cleans up and moves to done when the ticket's PR already reports MERGED, and otherwise moves the ticket to done. `Service.MergeTicket(ctx, id, strategy)` performs the merge and moves the ticket to done itself.
 - **Strategies** (`[git] merge_strategy`, default `local`):
   - `local`: rebase the ticket branch onto the base branch *inside the worktree*, then `git merge --ff-only` in the repo root (root must be clean and on the base branch). Conflicts abort the rebase, emit a `merge.conflict` event, and leave the ticket in review.
@@ -516,13 +544,13 @@ Backlog -> In Progress            -> Review              -> Done
 | Key | Default | Description |
 |-----|---------|-------------|
 | `merge_strategy` | `local` | `local` (rebase + ff-only) or `pr` (push + gh pr create) |
-| `worktree_root` | `~/.agentboard/worktrees/<project>` | Where ticket worktrees live |
+| `worktree_root` | `~/.agentboard/worktrees/<key>` | Where ticket worktrees live |
 | `branch_prefix` | `agent/` | Branch name prefix when ticket has no branch |
 | `base_branch` | auto-detect `main`/`master` | Merge target |
 | `setup_script` | — | Shell command run with `sh -c` inside each **new** worktree before the agent starts (10 min limit). On failure the worktree is removed and the start is refused, so a retry sets up again |
 | `copy_files` | — | Paths or globs relative to the repo root (e.g. `.env`, `config/*.local.json`) copied into each new worktree before `setup_script`; missing matches are skipped, paths outside the repo are refused |
 
-Put these in the per-project config, `~/.agentboard/projects/<project>/config.toml`, since they differ per repository.
+Put these in the per-project config, `~/.agentboard/projects/<key>/config.toml`, since they differ per repository.
 
 ---
 

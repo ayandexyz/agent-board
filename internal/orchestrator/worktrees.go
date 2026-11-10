@@ -64,6 +64,7 @@ func (m *WorktreeManager) pathFor(t store.Ticket) string {
 func (m *WorktreeManager) Ensure(ctx context.Context, t store.Ticket) (WorktreeInfo, error) {
 	path := m.pathFor(t)
 	branch := m.branchFor(t)
+	recorded := t.WorktreePath
 
 	base, err := m.base(ctx)
 	if err != nil {
@@ -75,8 +76,8 @@ func (m *WorktreeManager) Ensure(ctx context.Context, t store.Ticket) (WorktreeI
 		return WorktreeInfo{}, fmt.Errorf("orchestrator.ensureWorktree: %w", err)
 	}
 	for _, p := range registered {
-		if p == path {
-			return WorktreeInfo{Path: path, Branch: branch, Base: base, Created: false}, nil
+		if p == recorded || p == path {
+			return WorktreeInfo{Path: p, Branch: branch, Base: base, Created: false}, nil
 		}
 	}
 

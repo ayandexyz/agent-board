@@ -39,7 +39,7 @@ func runTUI() int {
 	}
 
 	if !tmux.IsInTmux() {
-		sessionName := cfg.ProjectName
+		sessionName := cfg.ProjectKey
 		setup, attachArgs := tmux.BootstrapCommands(sessionName, os.Args[0],
 			tmux.SessionExists(sessionName), tmux.WindowExists(sessionName, "agentboard"))
 		for _, args := range setup {
@@ -53,7 +53,7 @@ func runTUI() int {
 		return 1
 	}
 
-	sessionName := cfg.ProjectName
+	sessionName := cfg.ProjectKey
 	if actualSession, err := tmux.GetCurrentSessionName(); err == nil {
 		sessionName = actualSession
 	}
@@ -150,7 +150,7 @@ func runTUI() int {
 				g,
 				git.NewGH(git.ExecRunner()),
 				repoRoot,
-				cfg.Git.ResolvedWorktreeRoot(config.GetBaseDir(), cfg.ProjectName),
+				cfg.Git.ResolvedWorktreeRoot(config.GetBaseDir(), cfg.ProjectKey),
 				cfg.Git.BranchPrefix,
 				cfg.Git.BaseBranch,
 			)
