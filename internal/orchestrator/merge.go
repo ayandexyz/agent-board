@@ -65,7 +65,7 @@ func (s *Service) effectiveStrategy(strategy MergeStrategy) MergeStrategy {
 }
 
 func (s *Service) MergeTicket(ctx context.Context, ticketID string, strategy MergeStrategy) (MergeResult, error) {
-	if s.merger == nil {
+	if s.merger == nil && s.repoGit == nil {
 		return MergeResult{}, fmt.Errorf("orchestrator.mergeTicket: git integration not configured")
 	}
 	if err := s.reserve(ticketID, "merging", true); err != nil {
@@ -81,8 +81,16 @@ func (s *Service) MergeTicket(ctx context.Context, ticketID string, strategy Mer
 		return MergeResult{}, err
 	}
 
-	if ticket.WorktreePath != "" && s.worktrees != nil {
-		dirty, err := s.worktrees.IsDirty(ctx, ticket.WorktreePath)
+	g, err := s.gitFor(ctx, ticket)
+	if err != nil {
+		return MergeResult{}, fmt.Errorf("orchestrator.mergeTicket: %w", err)
+	}
+	if g.merger == nil {
+		return MergeResult{}, fmt.Errorf("orchestrator.mergeTicket: git integration not configured")
+	}
+
+	if ticket.WorktreePath != "" && g.worktrees != nil {
+		dirty, err := g.worktrees.IsDirty(ctx, ticket.WorktreePath)
 		if err != nil {
 			return MergeResult{}, fmt.Errorf("orchestrator.mergeTicket: %w", err)
 		}
@@ -100,13 +108,13 @@ func (s *Service) MergeTicket(ctx context.Context, ticketID string, strategy Mer
 
 	switch resolved {
 	case MergeStrategyLocal:
-		res, err := s.merger.MergeLocal(ctx, ticket)
+		res, err := g.merger.MergeLocal(ctx, ticket)
 		if err != nil {
 			return MergeResult{Outcome: MergeOutcomeError, Detail: err.Error()}, err
 		}
 		switch res.Outcome {
 		case MergeOutcomeMerged:
-			if err := s.finalizeMerge(ctx, ticket, false); err != nil {
+			if err := s.finalizeMerge(ctx, g.merger, ticket, false); err != nil {
 				return res, err
 			}
 		case MergeOutcomeConflict:
@@ -124,7 +132,7 @@ func (s *Service) MergeTicket(ctx context.Context, ticketID string, strategy Mer
 		if cc, err := s.store.GetContextCarry(ctx, ticketID); err == nil && cc.Summary != "" {
 			body = body + "\n\n" + cc.Summary
 		}
-		res, err := s.merger.CreatePR(ctx, ticket, title, body)
+		res, err := g.merger.CreatePR(ctx, ticket, title, body)
 		if err != nil {
 			return MergeResult{Outcome: MergeOutcomeError, Detail: err.Error()}, err
 		}
@@ -147,8 +155,8 @@ func (s *Service) MergeTicket(ctx context.Context, ticketID string, strategy Mer
 // is gone. A cleanup that fails leaves the ticket in review with its path
 // intact, so the next merge attempt retries the cleanup instead of the
 // worktree being orphaned behind a done ticket.
-func (s *Service) finalizeMerge(ctx context.Context, ticket store.Ticket, forceBranch bool) error {
-	if err := s.merger.Cleanup(ctx, ticket, forceBranch); err != nil {
+func (s *Service) finalizeMerge(ctx context.Context, merger Merger, ticket store.Ticket, forceBranch bool) error {
+	if err := merger.Cleanup(ctx, ticket, forceBranch); err != nil {
 		_, _ = s.store.CreateEvent(ctx, store.Event{
 			TicketID: ticket.ID,
 			Kind:     "merge.cleanup_failed",
@@ -189,17 +197,21 @@ func (s *Service) CompleteTicket(ctx context.Context, ticketID string) error {
 		return err
 	}
 
-	if s.merger != nil && ticket.UsesWorktree() {
+	g, err := s.gitFor(ctx, ticket)
+	if err != nil {
+		return fmt.Errorf("orchestrator.completeTicket: %w", err)
+	}
+	if g.merger != nil && ticket.UsesWorktree() {
 		hasWork := ticket.WorktreePath != "" || ticket.Branch != "" || ticket.PRURL != ""
 		if hasWork {
 			if ticket.PRURL != "" {
-				info, err := s.merger.PRState(ctx, ticket)
+				info, err := g.merger.PRState(ctx, ticket)
 				if err == nil && info.State == "MERGED" {
 					if err := s.reserve(ticketID, "merging", true); err != nil {
 						return err
 					}
 					defer s.release(ticketID)
-					return s.finalizeMerge(ctx, ticket, true)
+					return s.finalizeMerge(ctx, g.merger, ticket, true)
 				}
 				return &MergeRequiredError{
 					TicketID: ticketID,
@@ -228,9 +240,15 @@ func (s *Service) DeleteTicket(ctx context.Context, ticketID string) error {
 		return err
 	}
 	defer s.release(ticketID)
-	if ticket.WorktreePath != "" && s.worktrees != nil {
-		if err := s.worktrees.Remove(ctx, ticket.WorktreePath, false); err != nil {
+	if ticket.WorktreePath != "" {
+		g, err := s.gitFor(ctx, ticket)
+		if err != nil {
 			return fmt.Errorf("orchestrator.deleteTicket: %w", err)
+		}
+		if g.worktrees != nil {
+			if err := g.worktrees.Remove(ctx, ticket.WorktreePath, false); err != nil {
+				return fmt.Errorf("orchestrator.deleteTicket: %w", err)
+			}
 		}
 	}
 	return s.store.DeleteTicket(ctx, ticketID)

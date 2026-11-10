@@ -36,6 +36,11 @@ func NewWorktreeManager(g *git.Git, gh *git.GH, repoRoot, worktreeRoot, branchPr
 	}
 }
 
+// Root is the directory the manager creates worktrees in.
+func (m *WorktreeManager) Root() string {
+	return m.worktreeRoot
+}
+
 func (m *WorktreeManager) base(ctx context.Context) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

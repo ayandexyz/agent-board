@@ -13,7 +13,16 @@ import (
 var (
 	ErrTitleRequired     = errors.New("orchestrator: ticket title is required")
 	ErrInvalidBranchMode = errors.New("orchestrator: invalid branch mode")
+	ErrNoWorkspace       = errors.New("orchestrator: this board cannot hold other repositories' tickets")
+	ErrRepoLocked        = errors.New("orchestrator: ticket has work in its repository")
 )
+
+// RepoLinker is a store that can hold tickets of other repositories. Link
+// returns the root of the repository containing path, or "" for the board's
+// own.
+type RepoLinker interface {
+	Link(ctx context.Context, path string) (string, error)
+}
 
 type CreateTicketInput struct {
 	Title    string
@@ -21,6 +30,9 @@ type CreateTicketInput struct {
 	Priority string
 	Agent    string
 	Status   string
+	// Repo is a path inside the repository the ticket belongs to, when that
+	// is not the board's own.
+	Repo string
 }
 
 // DefaultBranchName is the branch a ticket gets when nobody named one:
@@ -72,12 +84,16 @@ func (s *Service) CreateTicket(ctx context.Context, in CreateTicketInput) (store
 		}
 		status = statuses[0]
 	}
+	if _, ok := s.store.(RepoLinker); in.Repo != "" && !ok {
+		return store.Ticket{}, fmt.Errorf("orchestrator.createTicket: %w", ErrNoWorkspace)
+	}
 	t, err := s.store.CreateTicket(ctx, store.Ticket{
 		Title:    in.Title,
 		Prompt:   in.Prompt,
 		Priority: in.Priority,
 		Agent:    in.Agent,
 		Status:   status,
+		Repo:     in.Repo,
 	})
 	if err != nil {
 		return store.Ticket{}, fmt.Errorf("orchestrator.createTicket: %w", err)
@@ -136,6 +152,66 @@ func (s *Service) SetBranchMode(ctx context.Context, ticketID, mode string) (sto
 		return store.Ticket{}, fmt.Errorf("orchestrator.setBranchMode: %w", err)
 	}
 	return updated, nil
+}
+
+// SetTicketRepo moves a ticket to the board of the repository containing
+// repo, or back to this board when repo is "". The ticket gets that board's
+// next id. A ticket that already has a worktree, a PR or a running agent
+// stays where it is: its work lives in the repository it started in.
+func (s *Service) SetTicketRepo(ctx context.Context, ticketID, repo string) (store.Ticket, error) {
+	linker, ok := s.store.(RepoLinker)
+	if !ok {
+		return store.Ticket{}, fmt.Errorf("orchestrator.setTicketRepo: %w", ErrNoWorkspace)
+	}
+	if err := s.reserve(ticketID, "moving", true); err != nil {
+		return store.Ticket{}, err
+	}
+	defer s.release(ticketID)
+
+	t, err := s.store.GetTicket(ctx, ticketID)
+	if err != nil {
+		return store.Ticket{}, fmt.Errorf("orchestrator.setTicketRepo: %w", err)
+	}
+	root := ""
+	if repo != "" {
+		if root, err = linker.Link(ctx, repo); err != nil {
+			return store.Ticket{}, fmt.Errorf("orchestrator.setTicketRepo: %w", err)
+		}
+	}
+	if root == t.Repo {
+		return t, nil
+	}
+	if t.WorktreePath != "" || t.PRURL != "" || t.AgentActive || s.store.HasActiveSession(ctx, ticketID) {
+		return store.Ticket{}, fmt.Errorf("orchestrator.setTicketRepo %s: %w", ticketID, ErrRepoLocked)
+	}
+
+	s.mu.RLock()
+	prefix := s.branchPrefix
+	s.mu.RUnlock()
+	branch := t.Branch
+	if branch == DefaultBranchName(prefix, t.ID) {
+		branch = ""
+	}
+	moved, err := s.store.CreateTicket(ctx, store.Ticket{
+		Title:      t.Title,
+		Prompt:     t.Prompt,
+		Status:     t.Status,
+		Priority:   t.Priority,
+		Agent:      t.Agent,
+		Branch:     branch,
+		BranchMode: t.BranchMode,
+		Tags:       t.Tags,
+		DependsOn:  t.DependsOn,
+		CreatedAt:  t.CreatedAt,
+		Repo:       root,
+	})
+	if err != nil {
+		return store.Ticket{}, fmt.Errorf("orchestrator.setTicketRepo: %w", err)
+	}
+	if err := s.store.DeleteTicket(ctx, ticketID); err != nil {
+		return moved, fmt.Errorf("orchestrator.setTicketRepo: moved to %s but %s remains: %w", moved.ID, ticketID, err)
+	}
+	return moved, nil
 }
 
 func (s *Service) GetProposal(ctx context.Context, id string) (store.Proposal, error) {

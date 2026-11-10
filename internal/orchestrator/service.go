@@ -25,6 +25,7 @@ type Service struct {
 	worktrees     Worktrees
 	merger        Merger
 	differ        Differ
+	repoGit       RepoGit
 	mergeStrategy MergeStrategy
 	branchPrefix  string
 	logs          map[string][]string
@@ -225,17 +226,21 @@ func (s *Service) SetWorktrees(w Worktrees) {
 }
 
 func (s *Service) prepareWorkDir(ctx context.Context, ticketID, sessionID string) (string, error) {
-	if s.worktrees == nil || ticketID == "" {
+	if ticketID == "" || (s.worktrees == nil && s.repoGit == nil) {
 		return "", nil
 	}
 	ticket, err := s.store.GetTicket(ctx, ticketID)
 	if err != nil {
 		return "", err
 	}
-	if !ticket.UsesWorktree() {
-		return "", nil
+	g, err := s.gitFor(ctx, ticket)
+	if err != nil {
+		return "", fmt.Errorf("orchestrator.prepareWorkDir: %w", err)
 	}
-	info, err := s.worktrees.Ensure(ctx, ticket)
+	if !ticket.UsesWorktree() || g.worktrees == nil {
+		return ticket.Repo, nil
+	}
+	info, err := g.worktrees.Ensure(ctx, ticket)
 	if err != nil {
 		return "", fmt.Errorf("orchestrator.prepareWorkDir: %w", err)
 	}

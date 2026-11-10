@@ -103,12 +103,19 @@ func untrackedPatch(dir, path string) (git.FileChange, string) {
 var ErrNoRepository = errors.New("orchestrator: not in a git repository")
 
 func (s *Service) TicketDiff(ctx context.Context, ticketID string) (TicketDiff, error) {
-	if s.differ == nil {
+	if s.differ == nil && s.repoGit == nil {
 		return TicketDiff{}, ErrNoRepository
 	}
 	ticket, err := s.store.GetTicket(ctx, ticketID)
 	if err != nil {
 		return TicketDiff{}, err
 	}
-	return s.differ.Diff(ctx, ticket)
+	g, err := s.gitFor(ctx, ticket)
+	if err != nil {
+		return TicketDiff{}, err
+	}
+	if g.differ == nil {
+		return TicketDiff{}, ErrNoRepository
+	}
+	return g.differ.Diff(ctx, ticket)
 }
