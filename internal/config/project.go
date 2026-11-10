@@ -139,3 +139,9 @@ func MigrateLegacyProject(baseDir string, p Project) error {
 	}
 	return nil
 }
+
+// RepoRoot returns the root of the main repository containing dir, so a
+// subdirectory or a linked worktree resolves to the checkout it belongs to.
+func RepoRoot(run GitRunner, dir string) (string, bool) {
+	return mainRepoRoot(run, dir)
+}
