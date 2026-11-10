@@ -95,7 +95,8 @@ install_pkg() {
   local pkg="$1"
   if is_termux;          then pkg install -y "$pkg"
   elif have brew;        then brew install "$pkg"
-  elif have apt-get;     then as_root apt-get install -y "$pkg"
+  elif have apt-get;     then as_root apt-get install -y "$pkg" \
+                                || { as_root apt-get update && as_root apt-get install -y "$pkg"; }
   elif have dnf;         then as_root dnf install -y "$pkg"
   elif have pacman;      then as_root pacman -S --noconfirm --needed "$pkg"
   elif have zypper;      then as_root zypper install -y "$pkg"
