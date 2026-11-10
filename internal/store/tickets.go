@@ -30,6 +30,10 @@ type Ticket struct {
 	ResumeCommand string
 	CreatedAt     time.Time
 	UpdatedAt     time.Time
+	// Repo is the root of the repository the ticket belongs to when that is
+	// not the board's own. It is not a column: a workspace board fills it in
+	// from which repository's board the ticket was read.
+	Repo string
 }
 
 type TicketFilters struct {
@@ -300,25 +304,21 @@ func (s *Store) UpdateTicket(ctx context.Context, t Ticket) (Ticket, error) {
 	return t, nil
 }
 
+// PurgeTicketRecords deletes everything recorded about a ticket except the
+// ticket itself: a workspace board keeps the sessions and events of tickets
+// whose row lives in another repository's board.
+func (s *Store) PurgeTicketRecords(ctx context.Context, id string) error {
+	for _, table := range []string{"context_carry", "orchestration_events", "proposals", "sessions"} {
+		if _, err := s.db.ExecContext(ctx, "DELETE FROM "+table+" WHERE ticket_id = ?", id); err != nil {
+			return fmt.Errorf("store.purgeTicketRecords: %s: %w", table, err)
+		}
+	}
+	return nil
+}
+
 func (s *Store) DeleteTicket(ctx context.Context, id string) error {
-	_, err := s.db.ExecContext(ctx, "DELETE FROM context_carry WHERE ticket_id = ?", id)
-	if err != nil {
-		return fmt.Errorf("store.deleteTicket: context_carry: %w", err)
-	}
-
-	_, err = s.db.ExecContext(ctx, "DELETE FROM orchestration_events WHERE ticket_id = ?", id)
-	if err != nil {
-		return fmt.Errorf("store.deleteTicket: events: %w", err)
-	}
-
-	_, err = s.db.ExecContext(ctx, "DELETE FROM proposals WHERE ticket_id = ?", id)
-	if err != nil {
-		return fmt.Errorf("store.deleteTicket: proposals: %w", err)
-	}
-
-	_, err = s.db.ExecContext(ctx, "DELETE FROM sessions WHERE ticket_id = ?", id)
-	if err != nil {
-		return fmt.Errorf("store.deleteTicket: sessions: %w", err)
+	if err := s.PurgeTicketRecords(ctx, id); err != nil {
+		return fmt.Errorf("store.deleteTicket: %w", err)
 	}
 
 	result, err := s.db.ExecContext(ctx, "DELETE FROM tickets WHERE id = ?", id)
