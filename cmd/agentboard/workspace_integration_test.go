@@ -125,6 +125,9 @@ func TestIntegrationWorkspaceRunsAndMergesATicketInAnotherRepository(t *testing.
 	if err != nil || res.Outcome != orchestrator.MergeOutcomeMerged {
 		t.Fatalf("MergeTicket = %+v, %v", res, err)
 	}
+	if res.Base != "main" {
+		t.Errorf("merged into %q, want main", res.Base)
+	}
 	if _, err := os.Stat(filepath.Join(freecode, "b.txt")); err != nil {
 		t.Errorf("merge did not reach freecode's main checkout: %v", err)
 	}

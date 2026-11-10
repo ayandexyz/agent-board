@@ -781,7 +781,7 @@ func (a *App) handleMergeRequest(ticketID string) (tea.Model, tea.Cmd) {
 					NotificationInfo,
 				)
 			}
-			a.mergeModal.Open(mergeReq.TicketID, mergeReq.Branch, mergeReq.Strategy)
+			a.mergeModal.Open(*mergeReq)
 			return a, nil
 		}
 		return a, a.showNotification("Error", err.Error(), NotificationError)
@@ -811,6 +811,13 @@ func (a *App) mergeTicketCmd(ticketID string, strategy orchestrator.MergeStrateg
 	}
 }
 
+func mergedInto(base string) string {
+	if base == "" {
+		return "the base branch"
+	}
+	return base
+}
+
 func (a *App) handleMergeResult(msg mergeResultMsg) (tea.Model, tea.Cmd) {
 	if msg.err != nil {
 		return a, a.showNotification("Merge failed", msg.err.Error(), NotificationError)
@@ -827,7 +834,7 @@ func (a *App) handleMergeResult(msg mergeResultMsg) (tea.Model, tea.Cmd) {
 		}
 		return a, a.showNotification(
 			"Merged",
-			fmt.Sprintf("%s merged into main, worktree cleaned up", msg.ticketID),
+			fmt.Sprintf("%s merged into %s, worktree cleaned up", msg.ticketID, mergedInto(msg.result.Base)),
 			NotificationSuccess,
 		)
 	case orchestrator.MergeOutcomePRCreated:

@@ -28,8 +28,10 @@ const (
 type MergeResult struct {
 	Outcome MergeOutcome
 	Branch  string
-	PRURL   string
-	Detail  string
+	// Base is the branch the work was merged into.
+	Base   string
+	PRURL  string
+	Detail string
 }
 
 type MergeRequiredError struct {
@@ -37,6 +39,16 @@ type MergeRequiredError struct {
 	Strategy MergeStrategy
 	Branch   string
 	PRURL    string
+	// Base is the branch the work merges into, "" when it could not be
+	// determined. Repo is the ticket's repository when not the board's own.
+	Base     string
+	Repo     string
+	Worktree string
+}
+
+// BaseBrancher is a merger that can name the branch it merges into.
+type BaseBrancher interface {
+	BaseBranch(ctx context.Context) (string, error)
 }
 
 func (e *MergeRequiredError) Error() string {
@@ -95,7 +107,7 @@ func (s *Service) MergeTicket(ctx context.Context, ticketID string, strategy Mer
 			return MergeResult{}, fmt.Errorf("orchestrator.mergeTicket: %w", err)
 		}
 		if dirty {
-			return MergeResult{Outcome: MergeOutcomeDirty, Detail: "worktree has uncommitted changes"}, nil
+			return MergeResult{Outcome: MergeOutcomeDirty, Detail: "worktree has uncommitted changes; commit or discard them in " + ticket.WorktreePath}, nil
 		}
 	}
 
@@ -220,11 +232,17 @@ func (s *Service) CompleteTicket(ctx context.Context, ticketID string) error {
 					PRURL:    ticket.PRURL,
 				}
 			}
-			return &MergeRequiredError{
+			req := &MergeRequiredError{
 				TicketID: ticketID,
 				Strategy: s.effectiveStrategy(""),
 				Branch:   ticket.Branch,
+				Repo:     ticket.Repo,
+				Worktree: ticket.WorktreePath,
 			}
+			if b, ok := g.merger.(BaseBrancher); ok {
+				req.Base, _ = b.BaseBranch(ctx)
+			}
+			return req
 		}
 	}
 

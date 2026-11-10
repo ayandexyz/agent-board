@@ -3,6 +3,7 @@ package orchestrator_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/ayandexyz/agent-board/internal/orchestrator"
@@ -167,3 +168,55 @@ func TestDiffForeignTicketUsesItsRepository(t *testing.T) {
 	}
 }
 
+// basedGitOps is a merger that knows its repository's base branch.
+type basedGitOps struct {
+	fakeGitOps
+	base string
+}
+
+func (b *basedGitOps) BaseBranch(context.Context) (string, error) { return b.base, nil }
+
+func TestMergeRequiredNamesTheTargetBranchAndRepository(t *testing.T) {
+	fs := &fakeStore{ticket: store.Ticket{ID: "FRE-02", Status: "review", WorktreePath: "/wt/FRE-02", Branch: "agent/fre-02", Repo: "/src/freecode"}}
+	svc := orchestrator.NewService(fs, &fakeLLMClient{}, nil, fakeCtx{})
+	svc.SetRepoGit(&repoGit{byRoot: map[string]orchestrator.Worktrees{"/src/freecode": &basedGitOps{base: "develop"}}})
+
+	err := svc.CompleteTicket(context.Background(), "FRE-02")
+	var mr *orchestrator.MergeRequiredError
+	if !errors.As(err, &mr) {
+		t.Fatalf("err = %v, want MergeRequiredError", err)
+	}
+	if mr.Base != "develop" || mr.Repo != "/src/freecode" || mr.Branch != "agent/fre-02" {
+		t.Errorf("MergeRequiredError = %+v, want agent/fre-02 into develop of /src/freecode", mr)
+	}
+}
+
+func TestMergeRequiredNamesTheWorktree(t *testing.T) {
+	fs := &fakeStore{ticket: store.Ticket{ID: "FRE-02", Status: "review", WorktreePath: "/wt/FRE-02", Branch: "agent/fre-02", Repo: "/src/freecode"}}
+	svc := orchestrator.NewService(fs, &fakeLLMClient{}, nil, fakeCtx{})
+	svc.SetRepoGit(&repoGit{byRoot: map[string]orchestrator.Worktrees{"/src/freecode": &basedGitOps{base: "main"}}})
+
+	var mr *orchestrator.MergeRequiredError
+	if err := svc.CompleteTicket(context.Background(), "FRE-02"); !errors.As(err, &mr) {
+		t.Fatalf("err = %v, want MergeRequiredError", err)
+	}
+	if mr.Worktree != "/wt/FRE-02" {
+		t.Errorf("Worktree = %q, want /wt/FRE-02", mr.Worktree)
+	}
+}
+
+func TestDirtyMergeSaysWhichWorktreeToCommitIn(t *testing.T) {
+	fs := &fakeStore{ticket: store.Ticket{ID: "FRE-02", Status: "review", WorktreePath: "/wt/FRE-02", Repo: "/src/freecode"}}
+	ops := &fakeGitOps{}
+	ops.dirty = true
+	svc := orchestrator.NewService(fs, &fakeLLMClient{}, nil, fakeCtx{})
+	svc.SetRepoGit(&repoGit{byRoot: map[string]orchestrator.Worktrees{"/src/freecode": ops}})
+
+	res, err := svc.MergeTicket(context.Background(), "FRE-02", "")
+	if err != nil {
+		t.Fatalf("MergeTicket: %v", err)
+	}
+	if res.Outcome != orchestrator.MergeOutcomeDirty || !strings.Contains(res.Detail, "/wt/FRE-02") {
+		t.Errorf("result = %+v, want a dirty outcome naming /wt/FRE-02", res)
+	}
+}
