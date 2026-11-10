@@ -37,6 +37,8 @@ type fakeBoard struct {
 	branchModeCalls []string
 	diff            orchestrator.TicketDiff
 	diffErr         error
+	lastCreateRepo  string
+	repoErr         error
 }
 
 func newFakeBoard() *fakeBoard {
@@ -68,7 +70,21 @@ func (f *fakeBoard) CreateTicket(_ context.Context, in orchestrator.CreateTicket
 	if in.Title == "" {
 		return store.Ticket{}, orchestrator.ErrTitleRequired
 	}
-	t := store.Ticket{ID: fmt.Sprintf("AGT-%02d", len(f.tickets)+1), Title: in.Title, Prompt: in.Prompt, Status: "backlog", Priority: "medium", Agent: in.Agent, BranchMode: "worktree"}
+	f.lastCreateRepo = in.Repo
+	t := store.Ticket{ID: fmt.Sprintf("AGT-%02d", len(f.tickets)+1), Title: in.Title, Prompt: in.Prompt, Status: "backlog", Priority: "medium", Agent: in.Agent, BranchMode: "worktree", Repo: in.Repo}
+	f.tickets[t.ID] = t
+	return t, nil
+}
+func (f *fakeBoard) SetTicketRepo(_ context.Context, id, repo string) (store.Ticket, error) {
+	if f.repoErr != nil {
+		return store.Ticket{}, f.repoErr
+	}
+	t, ok := f.tickets[id]
+	if !ok {
+		return store.Ticket{}, store.ErrNotFound
+	}
+	delete(f.tickets, id)
+	t.ID, t.Repo = "FRE-01", repo
 	f.tickets[t.ID] = t
 	return t, nil
 }

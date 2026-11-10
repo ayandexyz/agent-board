@@ -29,6 +29,7 @@ type Ticket struct {
 	Activity      string    `json:"activity,omitempty"`
 	SessionID     string    `json:"session_id,omitempty"`
 	ResumeCommand string    `json:"resume_command,omitempty"`
+	Repo          string    `json:"repo,omitempty"`
 	CreatedAt     time.Time `json:"created_at"`
 	UpdatedAt     time.Time `json:"updated_at"`
 }
@@ -48,6 +49,9 @@ type CreateTicket struct {
 	Prompt   string `json:"prompt"`
 	Priority string `json:"priority"`
 	Agent    string `json:"agent"`
+	// Repo is a path inside the repository the ticket belongs to; empty
+	// keeps it on this board.
+	Repo string `json:"repo,omitempty"`
 }
 
 // UpdateTicket is a partial edit: only fields present in the JSON change.
@@ -67,6 +71,12 @@ type SetStatus struct {
 
 type SetBranchMode struct {
 	Mode string `json:"mode"`
+}
+
+// SetRepo moves a ticket to the board of the repository containing Repo, or
+// back to this board when it is empty. The ticket comes back with a new id.
+type SetRepo struct {
+	Repo string `json:"repo"`
 }
 
 type StartRun struct {
