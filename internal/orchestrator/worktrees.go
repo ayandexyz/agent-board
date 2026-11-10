@@ -36,6 +36,15 @@ func NewWorktreeManager(g *git.Git, gh *git.GH, repoRoot, worktreeRoot, branchPr
 	}
 }
 
+// Root is the directory the manager creates worktrees in.
+func (m *WorktreeManager) Root() string {
+	return m.worktreeRoot
+}
+
+func (m *WorktreeManager) BaseBranch(ctx context.Context) (string, error) {
+	return m.base(ctx)
+}
+
 func (m *WorktreeManager) base(ctx context.Context) (string, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -168,7 +177,7 @@ func (m *WorktreeManager) MergeLocal(ctx context.Context, t store.Ticket) (Merge
 		return MergeResult{}, fmt.Errorf("orchestrator.mergeLocal: %w", err)
 	}
 
-	return MergeResult{Outcome: MergeOutcomeMerged, Branch: branch}, nil
+	return MergeResult{Outcome: MergeOutcomeMerged, Branch: branch, Base: base}, nil
 }
 
 func (m *WorktreeManager) CreatePR(ctx context.Context, t store.Ticket, title, body string) (MergeResult, error) {

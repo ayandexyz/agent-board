@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 
 	"github.com/ayandexyz/agent-board/internal/orchestrator"
 	"github.com/ayandexyz/agent-board/internal/theme"
@@ -29,6 +30,9 @@ type MergeModal struct {
 	active   bool
 	ticketID string
 	branch   string
+	base     string
+	repo     string
+	worktree string
 	strategy orchestrator.MergeStrategy
 	cursor   int
 	width    int
@@ -49,10 +53,14 @@ func (m *MergeModal) Active() bool {
 	return m.active
 }
 
-func (m *MergeModal) Open(ticketID, branch string, strategy orchestrator.MergeStrategy) {
+func (m *MergeModal) Open(req orchestrator.MergeRequiredError) {
 	m.active = true
-	m.ticketID = ticketID
-	m.branch = branch
+	m.ticketID = req.TicketID
+	m.branch = req.Branch
+	m.base = req.Base
+	m.repo = req.Repo
+	m.worktree = req.Worktree
+	strategy := req.Strategy
 	if strategy == "" {
 		strategy = orchestrator.MergeStrategyLocal
 	}
@@ -64,6 +72,9 @@ func (m *MergeModal) Close() {
 	m.active = false
 	m.ticketID = ""
 	m.branch = ""
+	m.base = ""
+	m.repo = ""
+	m.worktree = ""
 }
 
 func (m *MergeModal) toggleStrategy() {
@@ -140,7 +151,19 @@ func (m MergeModal) ViewBox() string {
 		branch = "(branch created at start)"
 	}
 
-	message := fmt.Sprintf("Branch: %s\nStrategy: %s\n\nPress s to switch strategy.", branch, m.strategyLabel())
+	into := m.base
+	if into == "" {
+		into = "the repository's default branch"
+	}
+	if m.repo != "" {
+		into += "  (" + filepath.Base(m.repo) + ")"
+	}
+
+	message := fmt.Sprintf("From:     %s\nInto:     %s\nStrategy: %s", branch, into, m.strategyLabel())
+	if m.worktree != "" {
+		message += "\nWorktree: " + abbreviateHome(m.worktree)
+	}
+	message += "\n\nPress s to switch strategy."
 
 	merge := "[ Merge ]"
 	cancel := "[ Cancel ]"
@@ -152,7 +175,7 @@ func (m MergeModal) ViewBox() string {
 		cancel = m.styles.Highlight.Render(cancel)
 	}
 
-	boxWidth := 48
+	boxWidth := 64
 	messageStyle := m.styles.Message.Width(boxWidth - 4)
 	content := m.styles.Title.Render("Merge "+m.ticketID) + "\n\n" +
 		messageStyle.Render(message) + "\n\n" +

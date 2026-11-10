@@ -29,6 +29,7 @@ type Board interface {
 	ListTickets(ctx context.Context, f store.TicketFilters) ([]store.Ticket, error)
 	GetTicket(ctx context.Context, id string) (store.Ticket, error)
 	CreateTicket(ctx context.Context, in orchestrator.CreateTicketInput) (store.Ticket, error)
+	SetTicketRepo(ctx context.Context, ticketID, repo string) (store.Ticket, error)
 	UpdateTicket(ctx context.Context, t store.Ticket) (store.Ticket, error)
 	SetBranchMode(ctx context.Context, id, mode string) (store.Ticket, error)
 	MoveTicketStatus(ctx context.Context, id, status string) error

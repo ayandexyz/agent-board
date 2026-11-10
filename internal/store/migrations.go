@@ -208,5 +208,14 @@ func (s *Store) migrate() error {
 		return err
 	}
 
+	_, err = s.db.Exec(`CREATE TABLE IF NOT EXISTS linked_repos (
+		path        TEXT PRIMARY KEY,
+		project_key TEXT NOT NULL,
+		linked_at   DATETIME NOT NULL
+	);`)
+	if err != nil {
+		return err
+	}
+
 	return nil
 }

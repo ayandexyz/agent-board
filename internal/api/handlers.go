@@ -13,6 +13,7 @@ import (
 	"github.com/ayandexyz/agent-board/internal/apitypes"
 	"github.com/ayandexyz/agent-board/internal/orchestrator"
 	"github.com/ayandexyz/agent-board/internal/store"
+	"github.com/ayandexyz/agent-board/internal/workspace"
 )
 
 const maxBody = 1 << 20
@@ -30,6 +31,7 @@ func (s *Server) routes() {
 	m.HandleFunc("DELETE /api/v1/tickets/{id}", s.handleDeleteTicket)
 	m.HandleFunc("POST /api/v1/tickets/{id}/status", s.handleSetStatus)
 	m.HandleFunc("POST /api/v1/tickets/{id}/branch-mode", s.handleSetBranchMode)
+	m.HandleFunc("POST /api/v1/tickets/{id}/repo", s.handleSetRepo)
 	m.HandleFunc("POST /api/v1/tickets/{id}/start", s.handleStart)
 	m.HandleFunc("POST /api/v1/tickets/{id}/complete", s.handleComplete)
 	m.HandleFunc("POST /api/v1/tickets/{id}/merge", s.handleMerge)
@@ -110,6 +112,7 @@ func (s *Server) handleCreateTicket(w http.ResponseWriter, r *http.Request) {
 		Prompt:   in.Prompt,
 		Priority: in.Priority,
 		Agent:    in.Agent,
+		Repo:     in.Repo,
 	})
 	if err != nil {
 		writeErr(w, err)
@@ -221,6 +224,24 @@ func (s *Server) handleSetBranchMode(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	s.hub.publish("ticket.changed", map[string]string{"ticket_id": t.ID})
+	writeJSON(w, http.StatusOK, s.ticketDTO(t, s.sessionsByTicket()))
+}
+
+func (s *Server) handleSetRepo(w http.ResponseWriter, r *http.Request) {
+	var in apitypes.SetRepo
+	if !decode(w, r, &in) {
+		return
+	}
+	from := r.PathValue("id")
+	t, err := s.Board.SetTicketRepo(r.Context(), from, in.Repo)
+	if err != nil {
+		writeErr(w, err)
+		return
+	}
+	if t.ID != from {
+		s.hub.publish("ticket.deleted", map[string]string{"ticket_id": from})
+		s.hub.publish("ticket.created", map[string]string{"ticket_id": t.ID})
+	}
 	writeJSON(w, http.StatusOK, s.ticketDTO(t, s.sessionsByTicket()))
 }
 
@@ -452,6 +473,7 @@ func (s *Server) ticketDTO(t store.Ticket, sessions map[string]*orchestrator.Age
 		DependsOn:     t.DependsOn,
 		AgentActive:   t.AgentActive,
 		ResumeCommand: t.ResumeCommand,
+		Repo:          t.Repo,
 		CreatedAt:     t.CreatedAt,
 		UpdatedAt:     t.UpdatedAt,
 	}
@@ -507,9 +529,14 @@ func writeErr(w http.ResponseWriter, err error) {
 		errors.Is(err, store.ErrInvalidPriority),
 		errors.Is(err, orchestrator.ErrTitleRequired),
 		errors.Is(err, orchestrator.ErrInvalidBranchMode),
-		errors.Is(err, orchestrator.ErrUnknownAgent):
+		errors.Is(err, orchestrator.ErrUnknownAgent),
+		errors.Is(err, orchestrator.ErrNoWorkspace),
+		errors.Is(err, workspace.ErrNotARepo):
 		writeError(w, http.StatusBadRequest, err.Error())
 	case errors.Is(err, orchestrator.ErrTicketBusy),
+		errors.Is(err, orchestrator.ErrRepoLocked),
+		errors.Is(err, workspace.ErrPrefixClash),
+		errors.Is(err, workspace.ErrColumnsDiffer),
 		errors.Is(err, orchestrator.ErrInputSuppressed),
 		errors.Is(err, orchestrator.ErrNoRepository):
 		writeError(w, http.StatusConflict, err.Error())

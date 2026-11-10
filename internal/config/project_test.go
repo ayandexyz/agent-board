@@ -271,3 +271,23 @@ func TestLoadFromDirSeparatesKeyFromName(t *testing.T) {
 		t.Errorf("Project() = %+v, want %+v", cfg.Project(), p)
 	}
 }
+
+func TestRepoRootResolvesALinkedWorktreeToItsMainRepository(t *testing.T) {
+	main := t.TempDir()
+	g := &fakeGit{responses: map[string]string{commonDirArgs: filepath.Join(main, ".git")}}
+
+	root, ok := RepoRoot(g.run, filepath.Join(t.TempDir(), "worktrees", "FRE-01"))
+	if !ok {
+		t.Fatal("RepoRoot reported no repository")
+	}
+	if want := canonicalPath(main); root != want {
+		t.Errorf("RepoRoot = %q, want %q", root, want)
+	}
+}
+
+func TestRepoRootOutsideGitIsNotARepository(t *testing.T) {
+	g := &fakeGit{responses: map[string]string{}}
+	if _, ok := RepoRoot(g.run, t.TempDir()); ok {
+		t.Error("RepoRoot reported a repository outside git")
+	}
+}

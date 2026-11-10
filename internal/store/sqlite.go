@@ -56,6 +56,10 @@ func (s *Store) SetTicketPrefix(prefix string) {
 	s.ticketPrefix = prefix
 }
 
+func (s *Store) TicketPrefix() string {
+	return s.ticketPrefix
+}
+
 // dsn opens the database in WAL mode with a busy timeout, so a second
 // agentboard process on the same file — a CLI command while the TUI is up —
 // waits for the write lock instead of failing at once with SQLITE_BUSY. The

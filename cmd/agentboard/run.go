@@ -20,6 +20,7 @@ import (
 	"github.com/ayandexyz/agent-board/internal/tmux"
 	"github.com/ayandexyz/agent-board/internal/tui"
 	"github.com/ayandexyz/agent-board/internal/version"
+	"github.com/ayandexyz/agent-board/internal/workspace"
 
 	tea "github.com/charmbracelet/bubbletea"
 )
@@ -84,9 +85,21 @@ func runTUI() int {
 	if tr, err := orchestrator.NewTmuxAgentRunner(sessionName); err == nil {
 		agentRunner = tr
 	}
+	homeRoot := ""
+	if cwd, err := os.Getwd(); err == nil {
+		homeRoot, _ = config.RepoRoot(config.ExecGit, cwd)
+	}
+	boards := repoBoards{baseDir: config.GetBaseDir(), homeDB: cfg.DB.Path, git: config.ExecGit}
+	ws := workspace.New(s, homeRoot, boards.Open)
+	if err := ws.Restore(context.Background()); err != nil {
+		fmt.Fprintf(os.Stderr, "warning: some linked repositories are unavailable: %v\n", err)
+	}
+	defer ws.Close()
+
 	mcpManager := mcp.NewManager(cfg.MCP)
 	ctxCarry := mcp.NewContextCarryAdapter(mcpManager, cfg.ProjectName)
-	orch := orchestrator.NewService(s, llmClient, runner, ctxCarry)
+	orch := orchestrator.NewService(ws, llmClient, runner, ctxCarry)
+	orch.SetRepoGit(&orchestrator.RepoWorktreeManagers{New: boards.Worktrees})
 	orch.SetBranchPrefix(cfg.Git.BranchPrefix)
 	if agentRunner != nil {
 		orch.SetAgentRunner(agentRunner)

@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"errors"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 
@@ -334,5 +336,64 @@ func TestDeleteTicketDirtyRefusalKeepsTicket(t *testing.T) {
 
 	if _, err := app.testStore().GetTicket(context.Background(), ticket.ID); err != nil {
 		t.Error("ticket must survive a refused delete")
+	}
+}
+
+func TestMergeModalShowsFromIntoAndRepository(t *testing.T) {
+	app, fo := newTestApp(t)
+	app = sized(t, app)
+	ticket, _ := app.testStore().CreateTicket(context.Background(), store.Ticket{Title: "T", Status: "review"})
+	fo.completeErr = &orchestrator.MergeRequiredError{
+		TicketID: ticket.ID,
+		Strategy: orchestrator.MergeStrategyLocal,
+		Branch:   "agent/fre-02",
+		Base:     "main",
+		Repo:     "/src/freecode",
+	}
+
+	m, _ := app.Update(mergeTicketRequestMsg{ticketID: ticket.ID})
+	view := m.(*App).View()
+
+	for _, want := range []string{"From", "agent/fre-02", "Into", "main", "freecode"} {
+		if !strings.Contains(view, want) {
+			t.Errorf("merge modal lacks %q:\n%s", want, view)
+		}
+	}
+}
+
+func TestMergeModalSaysDefaultBranchWhenTargetUnknown(t *testing.T) {
+	var m MergeModal
+	m.SetSize(100, 40)
+	m.Open(orchestrator.MergeRequiredError{TicketID: "AGT-01", Branch: "agent/agt-01"})
+	if !strings.Contains(m.ViewBox(), "default branch") {
+		t.Errorf("modal does not admit the target is unknown:\n%s", m.ViewBox())
+	}
+}
+
+func TestMergeModalShowsTheWorktreeLocation(t *testing.T) {
+	home, err := os.UserHomeDir()
+	if err != nil {
+		t.Skip("no home directory")
+	}
+	var m MergeModal
+	m.SetSize(120, 40)
+	m.Open(orchestrator.MergeRequiredError{
+		TicketID: "FRE-02",
+		Branch:   "agent/fre-02",
+		Worktree: filepath.Join(home, ".agentboard", "worktrees", "ayan-de-freecode", "FRE-02"),
+	})
+	box := m.ViewBox()
+	if !strings.Contains(box, "Worktree") || !strings.Contains(box, "~/.agentboard/worktrees/ayan-de-freecode/FRE-02") {
+		t.Errorf("modal lacks the worktree location:\n%s", box)
+	}
+}
+
+func TestMergedNotificationNamesTheActualTargetBranch(t *testing.T) {
+	app, _ := newTestApp(t)
+	app = sized(t, app)
+	m, _ := app.Update(mergeResultMsg{ticketID: "FRE-02", result: orchestrator.MergeResult{Outcome: orchestrator.MergeOutcomeMerged, Base: "develop"}})
+	view := m.(*App).View()
+	if !strings.Contains(view, "develop") {
+		t.Errorf("merged notification does not name develop:\n%s", view)
 	}
 }
