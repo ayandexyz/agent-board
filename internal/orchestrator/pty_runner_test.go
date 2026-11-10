@@ -366,9 +366,9 @@ case "$1" in
     count=$((count + 1))
     echo "$count" > "$FAKE_TMUX_COUNT_EXIT_TEST"
     if [ "$count" -le 2 ]; then
-      printf '12345:0:freecode\n'
+      printf '%%42:12345:0:freecode\n'
     else
-      printf '12345:0:bash\n'
+      printf '%%42:12345:0:bash\n'
     fi
     ;;
 esac
@@ -409,6 +409,134 @@ esac
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("onComplete was not called within 5s; monitorPane never detected the agent exiting back to the shell")
+	}
+}
+
+// A running agent's screen is not copied on every poll: remain-on-exit keeps
+// the pane, so the resume command is read once, after the agent has gone.
+func TestMonitorPaneCapturesOnlyAfterTheAgentExits(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-test,123,0")
+	t.Setenv("HOME", t.TempDir())
+
+	tmuxDir := t.TempDir()
+	countFile := filepath.Join(tmuxDir, "list-panes.count")
+	captureLog := filepath.Join(tmuxDir, "captures.log")
+	t.Setenv("FAKE_TMUX_COUNT", countFile)
+	t.Setenv("FAKE_TMUX_CAPTURES", captureLog)
+	t.Setenv("PATH", tmuxDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	fakeTmux := `#!/bin/sh
+count=0
+[ -f "$FAKE_TMUX_COUNT" ] && count=$(cat "$FAKE_TMUX_COUNT")
+case "$1" in
+  new-window)
+    printf '%%42\n'
+    ;;
+  capture-pane)
+    case " $* " in
+      *" -5000 "*)
+        echo "$count" >> "$FAKE_TMUX_CAPTURES"
+        printf 'claude --resume after-exit\n'
+        ;;
+      *) printf 'Claude Code v2.1.0\n' ;;
+    esac
+    ;;
+  list-panes)
+    count=$((count + 1))
+    echo "$count" > "$FAKE_TMUX_COUNT"
+    if [ "$count" -le 3 ]; then
+      printf '%%42:12345:0:claude\n'
+    else
+      printf '%%42:12345:0:bash\n'
+    fi
+    ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(tmuxDir, "tmux"), []byte(fakeTmux), 0755); err != nil {
+		t.Fatalf("write fake tmux: %v", err)
+	}
+
+	runner, err := NewTmuxAgentRunner("agentboard")
+	if err != nil {
+		t.Fatalf("NewTmuxAgentRunner() error = %v", err)
+	}
+	done := make(chan string, 1)
+	if _, err := runner.Start(testCtx(t), RunRequest{
+		SessionID: "session-capture-test",
+		Agent:     "claude-code",
+		OnComplete: func(_, _, resumeCommand string) {
+			done <- resumeCommand
+		},
+	}); err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+
+	select {
+	case got := <-done:
+		if got != "claude --resume after-exit" {
+			t.Fatalf("resumeCommand = %q, want the one printed at exit", got)
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("onComplete was not called within 5s")
+	}
+
+	raw, _ := os.ReadFile(captureLog)
+	for _, polls := range strings.Fields(string(raw)) {
+		if polls != "4" {
+			t.Fatalf("capture-pane ran after %s polls while the agent was alive; captures by poll: %q", polls, raw)
+		}
+	}
+}
+
+// Every agent's monitor reads one shared `list-panes -a`, so the number of
+// tmux processes per poll does not grow with the number of agents.
+func TestMonitorsShareOnePaneListing(t *testing.T) {
+	t.Setenv("TMUX", "/tmp/tmux-test,123,0")
+	t.Setenv("HOME", t.TempDir())
+
+	tmuxDir := t.TempDir()
+	logFile := filepath.Join(tmuxDir, "tmux.log")
+	windowsFile := filepath.Join(tmuxDir, "windows")
+	t.Setenv("FAKE_TMUX_LOG", logFile)
+	t.Setenv("FAKE_TMUX_WINDOWS", windowsFile)
+	t.Setenv("PATH", tmuxDir+string(os.PathListSeparator)+os.Getenv("PATH"))
+
+	fakeTmux := `#!/bin/sh
+printf '%s\n' "$*" >> "$FAKE_TMUX_LOG"
+case "$1" in
+  new-window)
+    n=$(( $(cat "$FAKE_TMUX_WINDOWS" 2>/dev/null || echo 40) + 1 ))
+    echo "$n" > "$FAKE_TMUX_WINDOWS"
+    printf '@%s:%%%s\n' "$n" "$n"
+    ;;
+  capture-pane) printf 'Claude Code v2.1.0\n' ;;
+  list-panes) printf '%%41:1:0:claude\n%%42:2:0:claude\n' ;;
+esac
+`
+	if err := os.WriteFile(filepath.Join(tmuxDir, "tmux"), []byte(fakeTmux), 0755); err != nil {
+		t.Fatalf("write fake tmux: %v", err)
+	}
+
+	runner, err := NewTmuxAgentRunner("agentboard")
+	if err != nil {
+		t.Fatalf("NewTmuxAgentRunner() error = %v", err)
+	}
+	ctx := testCtx(t)
+	for _, id := range []string{"session-share-a", "session-share-b"} {
+		if _, err := runner.Start(ctx, RunRequest{SessionID: id, Agent: "claude-code"}); err != nil {
+			t.Fatalf("Start(%s) error = %v", id, err)
+		}
+	}
+
+	time.Sleep(2600 * time.Millisecond)
+
+	raw, _ := os.ReadFile(logFile)
+	listings := strings.Count(string(raw), "list-panes")
+	if listings < 3 || listings > 7 {
+		t.Fatalf("list-panes ran %d times in ~5 polls for 2 agents, want one per poll", listings)
+	}
+	if strings.Contains(string(raw), "list-panes -t") {
+		t.Fatalf("a monitor listed its own pane instead of reading the shared listing:\n%s", raw)
 	}
 }
 
@@ -625,7 +753,7 @@ printf '%s\n' "$*" >> "$FAKE_TMUX_LOG"
 case "$1" in
   new-window) printf '%%42\n' ;;
   capture-pane) printf 'Ask anything\n' ;;
-  list-panes) printf '123:0:opencode\n' ;;
+  list-panes) printf '%%42:123:0:opencode\n' ;;
 esac
 `
 	if err := os.WriteFile(filepath.Join(tmuxDir, "tmux"), []byte(fakeTmux), 0755); err != nil {
@@ -674,7 +802,7 @@ printf '%s\n' "$*" >> "$FAKE_TMUX_LOG"
 case "$1" in
   new-window) printf '@7:%%42\n' ;;
   capture-pane) printf 'Ask anything\n' ;;
-  list-panes) printf '1:0:opencode\n' ;;
+  list-panes) printf '%%42:1:0:opencode\n' ;;
 esac
 `
 	if err := os.WriteFile(filepath.Join(tmuxDir, "tmux"), []byte(fakeTmux), 0755); err != nil {

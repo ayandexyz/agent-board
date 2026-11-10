@@ -21,6 +21,7 @@ type tmuxAgentRunner struct {
 	sessionName string
 	mu          sync.Mutex
 	panes       map[string]string
+	listing     paneListing
 }
 
 func NewTmuxAgentRunner(tmuxSession string) (*tmuxAgentRunner, error) {
@@ -240,28 +241,15 @@ func (r *tmuxAgentRunner) monitorPane(ctx context.Context, sessionID string, pan
 	defer ticker.Stop()
 	defer r.forget(sessionID)
 
-	var lastCaptured string
 	sawAgentRunning := false
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			// Capture output continuously so we always have the latest content
-			if out, err := r.capturePaneOutput(paneID, 5000); err == nil && out != "" {
-				lastCaptured = out
-			}
-
-			checkCmd := exec.Command("tmux", "list-panes", "-t", paneID, "-F", "#{pane_pid}:#{pane_dead}:#{pane_current_command}")
-			output, err := checkCmd.Output()
-
-			outStr := strings.TrimSpace(string(output))
-			fields := strings.SplitN(outStr, ":", 3)
-			isDead := len(fields) > 1 && fields[1] == "1"
-			currentCommand := ""
-			if len(fields) > 2 {
-				currentCommand = fields[2]
-			}
+			st, found, err := r.listing.status(paneID)
+			isDead := found && st.dead
+			currentCommand := st.command
 
 			// tmux only marks a pane dead when its top-level process (the
 			// wrapping shell) exits, not when the agent we launched inside
@@ -274,11 +262,13 @@ func (r *tmuxAgentRunner) monitorPane(ctx context.Context, sessionID string, pan
 			}
 			agentExited := sawAgentRunning && currentCommand != "" && currentCommand != agentBin
 
-			if err != nil || len(outStr) == 0 || isDead || agentExited {
+			if err != nil || !found || isDead || agentExited {
 				outcome := "completed"
 				summary := fmt.Sprintf("Agent session %s finished", sessionID)
 
-				captured := captureFinalPaneOutput(lastCaptured, func() (string, error) {
+				// remain-on-exit keeps the pane after the agent is gone, so its
+				// final screen — with any resume command — is read once, here.
+				captured := captureFinalPaneOutput("", func() (string, error) {
 					return r.capturePaneOutput(paneID, 5000)
 				}, time.Sleep)
 
