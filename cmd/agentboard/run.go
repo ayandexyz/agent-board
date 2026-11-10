@@ -6,6 +6,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"syscall"
 
 	"github.com/ayandexyz/agent-board/internal/activity"
 	"github.com/ayandexyz/agent-board/internal/api"
@@ -39,7 +40,7 @@ func runTUI() int {
 
 	if !tmux.IsInTmux() {
 		sessionName := cfg.ProjectName
-		setup, attach := tmux.BootstrapCommands(sessionName, os.Args[0],
+		setup, attachArgs := tmux.BootstrapCommands(sessionName, os.Args[0],
 			tmux.SessionExists(sessionName), tmux.WindowExists(sessionName, "agentboard"))
 		for _, args := range setup {
 			if out, err := exec.Command(args[0], args[1:]...).CombinedOutput(); err != nil {
@@ -47,15 +48,9 @@ func runTUI() int {
 				return 1
 			}
 		}
-		cmd := exec.Command(attach[0], attach[1:]...)
-		cmd.Stdin = os.Stdin
-		cmd.Stdout = os.Stdout
-		cmd.Stderr = os.Stderr
-		if err := cmd.Run(); err != nil {
-			fmt.Fprintf(os.Stderr, "error launching tmux: %v\n", err)
-			return 1
-		}
-		return 0
+		err := attach(attachArgs, os.Environ(), exec.LookPath, syscall.Exec)
+		fmt.Fprintf(os.Stderr, "error launching tmux: %v\n", err)
+		return 1
 	}
 
 	sessionName := cfg.ProjectName
