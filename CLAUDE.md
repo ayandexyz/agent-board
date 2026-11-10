@@ -61,6 +61,7 @@ agent-board/
 │   │   ├── handlers.go     # REST handlers under /api/v1
 │   │   ├── events.go       # Event hub and SSE /events stream
 │   │   └── terminal.go     # WebSocket terminal over a tmux viewer session
+│   ├── workspace/          # One board over several repositories' boards
 │   ├── store/              # SQLite persistence
 │   │   ├── sqlite.go       # DB connection, initialization, migrations
 │   │   ├── tickets.go      # Ticket CRUD operations
@@ -226,6 +227,46 @@ source of `DefaultPrefix`; only `ProjectKey` names directories.
 once, and never over an existing one. Old worktrees stay where they are:
 `WorktreeManager.Ensure` reuses the ticket's recorded `worktree_path` before
 deriving one from the root.
+
+---
+
+## Workspace Boards
+
+A board can hold tickets for other repositories, so one board opened in a
+parent directory (`~/Projects`, or anywhere outside git) can run agents
+across several repositories. `internal/workspace` does it.
+
+- **One home per ticket.** A ticket whose Repo row names another repository
+  lives in *that repository's own* `board.db`, under its prefix (`FRE-01`).
+  Opening AgentBoard inside the repository shows the same row, so the two
+  boards never drift: there is no copy to sync. Both TUIs reread the database
+  every 2 s (`boardSyncMsg`) to pick up the other's writes.
+- **Runtime stays with the runner.** Sessions, events, proposals, context
+  carry and pending requests stay on the board whose process runs the agent.
+  `Workspace` embeds the home store and overrides only the ticket methods,
+  which it routes by id prefix.
+- **Linking.** Naming a repository links it (`linked_repos` table on the home
+  board), and the link is reopened at startup (`Workspace.Restore`; a
+  repository that has gone is reported and skipped). `Link` refuses a board
+  whose prefix collides with one already shown (`ErrPrefixClash`: set
+  `[board] prefix` in that repository's config) or whose columns differ
+  (`ErrColumnsDiffer`). Any path inside a repository resolves to its main
+  root (`config.RepoRoot`), and a path outside git is `ErrNotARepo`.
+- **Git per repository.** `store.Ticket.Repo` is filled in on read, never
+  stored. `Service.gitFor` picks the home worktree manager for local tickets
+  and `RepoWorktreeManagers` for foreign ones, built from that repository's
+  own config (`cmd/agentboard/workspace.go`): its worktree root, base branch,
+  `setup_script` and `copy_files`. Worktrees land where that repository's own
+  board would put them, so either board can merge them. A current-branch
+  foreign ticket runs in the repository root.
+- **Moving.** `Service.SetTicketRepo` moves a ticket between boards by
+  creating it on the target and deleting the original, so it gets a new id.
+  It refuses with `ErrRepoLocked` once a worktree, PR or agent exists. In the
+  TUI it is the ticket's Repo row (`e`, type a path, `~` expands).
+
+Not built yet: a board refusing to start an agent on a ticket another board
+is already running. `agent_active` shows on both, but only the board that
+started the agent holds its session.
 
 ---
 
@@ -444,10 +485,11 @@ Routes, all under `/api/v1`:
 |---|---|
 | `GET /identity` | name, version, project, tmux session |
 | `GET /board` | tickets grouped by configured status, each with its live `activity` and `session_id`; `waiting` count |
-| `GET /tickets?status=&search=` · `POST /tickets` | list / create (lands in the first column) |
+| `GET /tickets?status=&search=` · `POST /tickets` | list / create (lands in the first column; `repo` puts it on that repository's board) |
 | `GET` · `PATCH` · `DELETE /tickets/{id}` | read / partial edit (status and branch mode excluded) / delete |
 | `POST /tickets/{id}/status` `{status}` | `MoveTicketStatus` |
 | `POST /tickets/{id}/branch-mode` `{mode}` | `SetBranchMode`: `current` clears the branch, `worktree` names the default |
+| `POST /tickets/{id}/repo` `{repo}` | `SetTicketRepo`: move to that repository's board (new id); `""` brings it home |
 | `POST /tickets/{id}/start` `{agent?, prompt?}` | `StartAdHocRun` on the ticket's own agent and prompt unless overridden |
 | `POST /tickets/{id}/complete` | `CompleteTicket`; `409` with `merge_required` when unmerged work exists |
 | `POST /tickets/{id}/merge` `{strategy?}` | `MergeTicket` |
@@ -475,8 +517,9 @@ ACL is the auth; the server still binds loopback only.
 
 Errors map sentinels to status codes: `store.ErrNotFound` 404;
 `ErrInvalidStatus`, `ErrInvalidPriority`, `ErrTitleRequired`,
-`ErrInvalidBranchMode`, `ErrUnknownAgent` 400; `ErrTicketBusy`,
-`ErrInputSuppressed` 409.
+`ErrInvalidBranchMode`, `ErrUnknownAgent`, `ErrNoWorkspace`, `ErrNotARepo`
+400; `ErrTicketBusy`, `ErrInputSuppressed`, `ErrRepoLocked`,
+`ErrPrefixClash`, `ErrColumnsDiffer` 409.
 
 The event stream is an in-memory ring of the last 256 events with a
 process-wide sequence. `run.completed` comes from
