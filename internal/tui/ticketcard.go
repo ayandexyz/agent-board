@@ -2,6 +2,7 @@ package tui
 
 import (
 	"fmt"
+	"path/filepath"
 	"strings"
 	"unicode/utf8"
 
@@ -242,6 +243,9 @@ func (c TicketCardModel) renderFooter(width int) string {
 	}
 
 	leftParts = append(leftParts, priorityIndicator)
+	if c.ticket.Repo != "" {
+		leftParts = append(leftParts, c.styles.Metadata.Render("⌂ "+filepath.Base(c.ticket.Repo)))
+	}
 	leftSide := strings.Join(leftParts, " ")
 
 	if c.ticket.Agent == "" {

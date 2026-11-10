@@ -75,6 +75,10 @@ func (f *fakeOrchestrator) SetBranchMode(ctx context.Context, ticketID, mode str
 	return f.svc.SetBranchMode(ctx, ticketID, mode)
 }
 
+func (f *fakeOrchestrator) SetTicketRepo(ctx context.Context, ticketID, repo string) (store.Ticket, error) {
+	return f.svc.SetTicketRepo(ctx, ticketID, repo)
+}
+
 func (f *fakeOrchestrator) SetTicketPrefix(prefix string) {
 	f.svc.SetTicketPrefix(prefix)
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"path/filepath"
 	"sort"
 	"strings"
 	"time"
@@ -82,6 +83,21 @@ type runCompletedMsg struct {
 
 type agentActiveChangedMsg struct{}
 
+type ticketMovedMsg struct {
+	from, to, repo string
+}
+
+// boardSyncMsg rereads the board. Another agentboard process may share these
+// tickets: the board of the repository a workspace ticket belongs to, or the
+// workspace showing this repository's tickets.
+type boardSyncMsg struct{}
+
+const boardSyncInterval = 2 * time.Second
+
+func boardSyncCmd() tea.Cmd {
+	return tea.Tick(boardSyncInterval, func(time.Time) tea.Msg { return boardSyncMsg{} })
+}
+
 type proposalFailedMsg struct {
 	ticketID string
 	err      error
@@ -143,6 +159,7 @@ type Board interface {
 	CreateTicket(ctx context.Context, in orchestrator.CreateTicketInput) (store.Ticket, error)
 	UpdateTicket(ctx context.Context, t store.Ticket) (store.Ticket, error)
 	SetBranchMode(ctx context.Context, ticketID, mode string) (store.Ticket, error)
+	SetTicketRepo(ctx context.Context, ticketID, repo string) (store.Ticket, error)
 	SetTicketPrefix(prefix string)
 	ProjectInitDate(ctx context.Context) (time.Time, error)
 	GetProposal(ctx context.Context, id string) (store.Proposal, error)
@@ -439,7 +456,7 @@ func (a *App) waitForCompletionCmd() tea.Cmd {
 func (a *App) Init() tea.Cmd {
 	// Always arm the animation tick at startup. The kanban only advances
 	// its animFrame when an agent is active, so idle ticks are cheap.
-	cmds := []tea.Cmd{tea.EnterAltScreen}
+	cmds := []tea.Cmd{tea.EnterAltScreen, boardSyncCmd()}
 	if c := a.tickCmd(); c != nil {
 		cmds = append(cmds, c)
 	}
@@ -564,6 +581,19 @@ func (a *App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			a.showNotification("Run completed", fmt.Sprintf("Agent finished working on %s", what), NotificationSuccess),
 			a.waitForCompletionCmd(),
 		)
+	case ticketMovedMsg:
+		a.kanban, _ = a.kanban.Reload()
+		where := "this board"
+		if msg.repo != "" {
+			where = filepath.Base(msg.repo)
+		}
+		return a, a.showNotification("Ticket moved", fmt.Sprintf("%s is now %s in %s", msg.from, msg.to, where), NotificationSuccess)
+	case boardSyncMsg:
+		if a.kanban.searchQuery == "" {
+			a.kanban, _ = a.kanban.Reload()
+			a.refreshActivity()
+		}
+		return a, boardSyncCmd()
 	case agentActiveChangedMsg:
 		// Emitted by the start*Cmd goroutines right after they call
 		// StartApprovedRun/StartAdHocRun, which sets AgentActive=true in the

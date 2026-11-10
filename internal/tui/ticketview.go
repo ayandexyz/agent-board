@@ -301,6 +301,11 @@ func ticketFields() []ticketField {
 			set:      func(t *store.Ticket, v string) { t.Branch = v },
 		},
 		{
+			label:    "Repo",
+			value:    func(t *store.Ticket) string { return abbreviateHome(t.Repo) },
+			editable: true,
+		},
+		{
 			label: "Tags",
 			value: func(t *store.Ticket) string {
 				if len(t.Tags) == 0 {
@@ -692,6 +697,9 @@ func (e textEdit) apply(msg tea.KeyMsg) (textEdit, bool) {
 func (m TicketViewModel) handleEditKey(msg tea.KeyMsg) (TicketViewModel, tea.Cmd) {
 	switch msg.Type {
 	case tea.KeyEnter:
+		if m.ticket != nil && m.cursor < len(m.fields) && m.fields[m.cursor].label == "Repo" {
+			return m.moveToRepo(expandHome(strings.TrimSpace(m.editBuffer)))
+		}
 		if m.ticket != nil && m.cursor < len(m.fields) {
 			f := m.fields[m.cursor]
 			if f.set != nil {
@@ -716,6 +724,25 @@ func (m TicketViewModel) handleEditKey(msg tea.KeyMsg) (TicketViewModel, tea.Cmd
 	}
 
 	return m, nil
+}
+
+// moveToRepo hands the ticket to the board of the repository at repo. The
+// ticket comes back under that board's id, so the view follows it there.
+func (m TicketViewModel) moveToRepo(repo string) (TicketViewModel, tea.Cmd) {
+	m.mode = ticketViewMode
+	m.editBuffer = ""
+	m.editCursor = 0
+	from := m.ticket.ID
+	moved, err := m.board.SetTicketRepo(context.Background(), from, repo)
+	if err != nil {
+		return m, func() tea.Msg {
+			return notificationMsg{title: "Cannot move ticket", message: err.Error(), variant: NotificationError}
+		}
+	}
+	*m.ticket = moved
+	return m, func() tea.Msg {
+		return ticketMovedMsg{from: from, to: moved.ID, repo: moved.Repo}
+	}
 }
 
 func (m TicketViewModel) handleBranchModeSelectKey(msg tea.KeyMsg) (TicketViewModel, tea.Cmd) {
@@ -1098,6 +1125,11 @@ func (m TicketViewModel) fieldValue(f ticketField, width int, selected bool) str
 		return lipgloss.NewStyle().Foreground(m.styles.AccentColor).Render(raw)
 	case "Branch":
 		return m.branchDisplay()
+	case "Repo":
+		if raw == "" {
+			return m.styles.Empty.Render("this board")
+		}
+		return lipgloss.NewStyle().Foreground(m.styles.AccentColor).Render(raw)
 	case "Tags":
 		return m.chips(m.ticket.Tags)
 	case "Depends On":
