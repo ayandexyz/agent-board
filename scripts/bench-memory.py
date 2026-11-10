@@ -12,8 +12,11 @@ Workloads:
            steady coloured output (default 20 lines/s per agent). Costs
            nothing, and makes both tools do the same screen work.
   claude   the real Claude Code, left at its prompt. Neither tool sends a
-           prompt, so no tokens are spent; Enter is pressed once, which
-           accepts the folder-trust dialog for the throwaway repo.
+           prompt, so no tokens are spent. Where a pane shows the folder-trust
+           dialog (whose default for a temp dir is "No, exit") the harness
+           picks "Yes" in it, the same way for both tools; a pane without the
+           dialog gets no keys, since Down + Enter at the prompt would resend
+           an old prompt.
 
 Isolation: agentboard gets its own tmux socket (TMUX_TMPDIR), database,
 worktree root and API port; herdr gets its own named session. Pane shells
@@ -56,6 +59,7 @@ PAGE_KB = os.sysconf("SC_PAGE_SIZE") // 1024
 SHELLS = {"bash", "sh", "zsh", "fish", "dash"}
 AGENTS = {"claude"}
 COLS, ROWS = 220, 50
+TRUST_DIALOG = "trust this folder"
 
 QUERY_REPLIES = [
     (b"\x1b[6n", b"\x1b[1;1R"),
@@ -166,6 +170,8 @@ def snapshot(roots: list[int]) -> dict:
         if bucket == "tool":
             by_name[table[pid][1]] = by_name.get(table[pid][1], 0) + kb
     snap["tool_by_process_kb"] = by_name
+    snap["agents_running"] = sum(1 for pid, b in kinds.items()
+                                 if b == "agent" and kinds.get(table[pid][0]) != "agent")
     return snap
 
 
@@ -307,8 +313,12 @@ class AgentBoard:
             sess = self._post(f"/tickets/{ticket['id']}/start", {"agent": "claude-code"})
             self.sessions.append(sess.get("id") or sess.get("session_id") or "")
 
-    def press_enter(self) -> None:
-        pass  # the board submits its (empty) launch prompt itself
+    def accept_trust(self) -> None:
+        for pane in self._tmux("list-panes", "-a", "-F", "#{pane_id}").split():
+            if TRUST_DIALOG in self._tmux("capture-pane", "-p", "-t", pane):
+                self._tmux("send-keys", "-t", pane, "Down")
+                time.sleep(0.3)
+                self._tmux("send-keys", "-t", pane, "Enter")
 
     def roots(self) -> list[int]:
         return [self.client.pid, self.server_pid]
@@ -372,12 +382,15 @@ class Herdr:
             self._cli("pane", "run", pane, "claude")
             self.panes.append(pane)
 
-    def press_enter(self) -> None:
+    def accept_trust(self) -> None:
         for pane in self.panes:
-            try:
+            screen = subprocess.run([self.binary, "--session", self.session, "pane", "read", pane,
+                                     "--source", "visible"], env=self.env,
+                                    capture_output=True, text=True, timeout=30).stdout
+            if TRUST_DIALOG in screen:
+                self._cli("pane", "send-keys", pane, "Down")
+                time.sleep(0.3)
                 self._cli("pane", "send-keys", pane, "Enter")
-            except RuntimeError:
-                pass
 
     def roots(self) -> list[int]:
         return [self.client.pid, self.server_pid]
@@ -434,6 +447,7 @@ def summarize(samples: list[dict], seconds: float) -> dict:
         "agent_pss_mb": stats([mb(s, "agent") for s in samples]),
         "tool_cpu_pct": cpu("tool"),
         "processes": {b: last[b]["procs"] for b in ("tool", "shell", "agent")},
+        "agents_running": min(s.get("agents_running", 0) for s in samples),
         "tool_by_process_mb": {k: round(statistics.median(v), 1) for k, v in sorted(names.items())},
     }
 
@@ -449,13 +463,16 @@ def run_one(tool, agents: int, workload: str, args, env: dict) -> dict:
         tool.launch(agents)
         launch_s = time.monotonic() - t0
         if agents:
-            got = wait_for(lambda: snapshot(tool.roots())["agent"]["procs"] >= agents,
+            got = wait_for(lambda: snapshot(tool.roots())["agents_running"] >= agents,
                            120, f"{agents} agent processes")
             assert got
         time.sleep(args.settle / 2)
         if workload == "claude":
-            tool.press_enter()
+            tool.accept_trust()
         time.sleep(args.settle / 2)
+        alive = snapshot(tool.roots())["agents_running"]
+        if alive < agents:
+            raise RuntimeError(f"only {alive} of {agents} agents still running when sampling began")
         samples, t1 = [], time.monotonic()
         while time.monotonic() - t1 < args.duration:
             samples.append(snapshot(tool.roots()))
